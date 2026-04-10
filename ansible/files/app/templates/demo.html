@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Live Demo — Smart Deploy Gate{% endblock %}
+{% block content %}
+
+<div style="max-width:680px;margin:0 auto">
+  <div style="text-align:center;margin:32px 0 24px">
+    <h1 style="font-size:26px;font-weight:700;margin-bottom:8px">Live Risk Scorer</h1>
+    <p style="color:#666">Adjust the sliders and see the ML model score your deploy in real time.</p>
+  </div>
+
+  <!-- Quick presets -->
+  <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
+    <button class="btn btn-secondary" onclick="loadPreset('risky')">Try: Risky Deploy</button>
+    <button class="btn btn-secondary" onclick="loadPreset('safe')">Try: Safe Deploy</button>
+    <button class="btn btn-secondary" onclick="loadPreset('hotfix')">Try: Hotfix</button>
+    <button class="btn btn-secondary" onclick="loadPreset('friday')">Try: Friday Night</button>
+  </div>
+
+  <div class="grid-2">
+    <!-- Sliders -->
+    <div class="card">
+      <div class="card-title">Build Parameters</div>
+
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>Diff size (lines)</span><strong id="v-diff">200</strong>
+        </div>
+        <input type="range" id="diff_size" min="1" max="2000" value="200"
+               oninput="document.getElementById('v-diff').textContent=this.value;score()" style="width:100%"/>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>Hour of day</span><strong id="v-hour">10</strong>
+        </div>
+        <input type="range" id="hour_of_day" min="0" max="23" value="10"
+               oninput="document.getElementById('v-hour').textContent=this.value;score()" style="width:100%"/>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>Day of week (0=Mon 6=Sun)</span><strong id="v-day">1</strong>
+        </div>
+        <input type="range" id="day_of_week" min="0" max="6" value="1"
+               oninput="document.getElementById('v-day').textContent=this.value;score()" style="width:100%"/>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>Recent failure rate</span><strong id="v-fail">0%</strong>
+        </div>
+        <input type="range" id="recent_failure_rate" min="0" max="100" value="0"
+               oninput="document.getElementById('v-fail').textContent=this.value+'%';score()" style="width:100%"/>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>Test pass rate</span><strong id="v-test">100%</strong>
+        </div>
+        <input type="range" id="test_pass_rate" min="0" max="100" value="100"
+               oninput="document.getElementById('v-test').textContent=this.value+'%';score()" style="width:100%"/>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>Is hotfix branch?</span>
+          <input type="checkbox" id="is_hotfix" onchange="score()" style="width:auto"/>
+        </div>
+      </div>
+
+      <div style="margin-bottom:4px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>Days since last deploy</span><strong id="v-days">3</strong>
+        </div>
+        <input type="range" id="days_since_deploy" min="0" max="60" value="3"
+               oninput="document.getElementById('v-days').textContent=this.value;score()" style="width:100%"/>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div>
+      <div class="card" style="text-align:center;margin-bottom:16px">
+        <div class="metric-label" style="margin-bottom:8px">Risk Score</div>
+        <div id="score-num" style="font-size:72px;font-weight:700;line-height:1;color:#534AB7">--</div>
+        <div style="font-size:14px;color:#aaa;margin-bottom:12px">out of 100</div>
+        <div id="verdict-badge" style="font-size:18px;font-weight:600;padding:8px 0"></div>
+        <div style="margin:12px 0">
+          <div class="progress-bar" style="height:12px">
+            <div id="score-bar" class="progress-fill" style="width:0%;background:#534AB7"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Top Risk Reasons</div>
+        <div id="reasons-list">
+          <p style="color:#aaa;text-align:center;padding:16px">Adjust sliders to see reasons</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-title">What this means</div>
+        <p id="explanation" style="font-size:13px;color:#666;line-height:1.6">
+          Move the sliders to simulate a deploy and see how the ML model scores it.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin:24px 0">
+    <a href="/" class="btn btn-primary" style="padding:12px 32px">Get API Key — Add to Jenkins →</a>
+  </div>
+</div>
+
+<script>
+const PRESETS = {
+  risky:  {diff_size:847, hour_of_day:17, day_of_week:4, recent_failure_rate:40, test_pass_rate:85, is_hotfix:false, days_since_deploy:3},
+  safe:   {diff_size:45,  hour_of_day:10, day_of_week:1, recent_failure_rate:0,  test_pass_rate:100,is_hotfix:false, days_since_deploy:1},
+  hotfix: {diff_size:120, hour_of_day:15, day_of_week:2, recent_failure_rate:20, test_pass_rate:90, is_hotfix:true,  days_since_deploy:0},
+  friday: {diff_size:600, hour_of_day:21, day_of_week:4, recent_failure_rate:30, test_pass_rate:70, is_hotfix:false, days_since_deploy:7},
+};
+
+function loadPreset(name) {
+  const p = PRESETS[name];
+  document.getElementById('diff_size').value           = p.diff_size;
+  document.getElementById('hour_of_day').value         = p.hour_of_day;
+  document.getElementById('day_of_week').value         = p.day_of_week;
+  document.getElementById('recent_failure_rate').value = p.recent_failure_rate;
+  document.getElementById('test_pass_rate').value      = p.test_pass_rate;
+  document.getElementById('is_hotfix').checked         = p.is_hotfix;
+  document.getElementById('days_since_deploy').value   = p.days_since_deploy;
+  document.getElementById('v-diff').textContent  = p.diff_size;
+  document.getElementById('v-hour').textContent  = p.hour_of_day;
+  document.getElementById('v-day').textContent   = p.day_of_week;
+  document.getElementById('v-fail').textContent  = p.recent_failure_rate + '%';
+  document.getElementById('v-test').textContent  = p.test_pass_rate + '%';
+  document.getElementById('v-days').textContent  = p.days_since_deploy;
+  score();
+}
+
+const EXPLANATIONS = {
+  SAFE:    "This deploy looks safe. The risk factors are low — good time to ship.",
+  WARNING: "Some risk factors are elevated. Proceed with caution and have a rollback plan ready.",
+  BLOCKED: "Multiple high-risk signals detected. Strongly recommend delaying this deploy.",
+};
+
+const BAR_COLORS = { SAFE: '#2eb886', WARNING: '#f2c744', BLOCKED: '#e01e5a' };
+
+let debounceTimer;
+async function score() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(async () => {
+    const payload = {
+      tenant_id:           'demo',
+      api_key:             'demo',
+      hour_of_day:         parseInt(document.getElementById('hour_of_day').value),
+      day_of_week:         parseInt(document.getElementById('day_of_week').value),
+      diff_size:           parseInt(document.getElementById('diff_size').value),
+      recent_failure_rate: parseInt(document.getElementById('recent_failure_rate').value) / 100,
+      test_pass_rate:      parseInt(document.getElementById('test_pass_rate').value) / 100,
+      is_hotfix:           document.getElementById('is_hotfix').checked ? 1 : 0,
+      days_since_deploy:   parseFloat(document.getElementById('days_since_deploy').value),
+    };
+
+    try {
+      const r    = await fetch('/demo/score', {
+        method:  'POST',
+        headers: {'Content-Type':'application/json'},
+        body:    JSON.stringify(payload)
+      });
+      const data = await r.json();
+
+      document.getElementById('score-num').textContent   = data.score;
+      document.getElementById('score-num').style.color   = BAR_COLORS[data.verdict];
+      document.getElementById('score-bar').style.width   = data.score + '%';
+      document.getElementById('score-bar').style.background = BAR_COLORS[data.verdict];
+      document.getElementById('verdict-badge').textContent  = data.verdict;
+      document.getElementById('verdict-badge').style.color  = BAR_COLORS[data.verdict];
+      document.getElementById('explanation').textContent    = EXPLANATIONS[data.verdict];
+
+      const reasons = data.top_reasons || [];
+      document.getElementById('reasons-list').innerHTML = reasons.map((r, i) => `
+        <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
+          <div style="width:20px;height:20px;border-radius:50%;background:#EEEDFE;color:#534AB7;
+                      font-size:11px;font-weight:600;display:flex;align-items:center;
+                      justify-content:center;flex-shrink:0;margin-top:1px">${i+1}</div>
+          <div>
+            <div style="font-size:13px;font-weight:500">${r.label}</div>
+            <div style="font-size:12px;color:#888">${r.value_str}</div>
+          </div>
+        </div>
+      `).join('');
+    } catch(e) {
+      console.error('Score error:', e);
+    }
+  }, 150);
+}
+
+// Score on page load with defaults
+window.addEventListener('load', score);
+</script>
+{% endblock %}

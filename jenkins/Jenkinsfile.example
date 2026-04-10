@@ -1,0 +1,156 @@
+// Jenkinsfile.example
+// Path: C:\deploy-gate\jenkins\Jenkinsfile.example
+//
+// Add the "Deploy Gate Risk Check" stage to your existing Jenkinsfile.
+// Replace DEPLOY_GATE_URL, TENANT_ID, and API_KEY with your values.
+// Everything else is automatic.
+
+pipeline {
+    agent any
+
+    environment {
+        // ── CHANGE THESE 3 VALUES ──────────────────────────────
+        DEPLOY_GATE_URL = "http://54.89.160.150"
+        TENANT_ID       = "your-tenant-id-here"
+        API_KEY         = "your-api-key-here"
+        // ───────────────────────────────────────────────────────
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                // Capture git diff size for scoring
+                script {
+                    try {
+                        env.GIT_DIFF_SIZE = sh(
+                            script: "git diff --stat HEAD~1 HEAD | tail -1 | awk '{print \$4+\$6}'",
+                            returnStdout: true
+                        ).trim()
+                        env.GIT_FILES_CHANGED = sh(
+                            script: "git diff --name-only HEAD~1 HEAD | wc -l",
+                            returnStdout: true
+                        ).trim()
+                    } catch (err) {
+                        // First commit or shallow clone — use defaults
+                        env.GIT_DIFF_SIZE      = "100"
+                        env.GIT_FILES_CHANGED  = "5"
+                    }
+                }
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                // Your existing build and test steps here
+                echo "Running build and tests..."
+                // sh 'mvn clean test'
+                // sh 'npm test'
+            }
+        }
+
+        // ── ADD THIS STAGE TO YOUR PIPELINE ───────────────────
+        stage('Deploy Gate Risk Check') {
+            steps {
+                script {
+                    def hour       = new Date().hours
+                    def dayOfWeek  = new Date().day   // 0=Sun, 1=Mon... 6=Sat
+                    // Convert to Mon=0 format
+                    def dow        = dayOfWeek == 0 ? 6 : dayOfWeek - 1
+
+                    def isHotfix   = (env.BRANCH_NAME?.toLowerCase()?.contains('hotfix') ||
+                                      env.BRANCH_NAME?.toLowerCase()?.contains('fix/')) ? 1 : 0
+
+                    def payload = """
+                    {
+                        "tenant_id":           "${TENANT_ID}",
+                        "api_key":             "${API_KEY}",
+                        "hour_of_day":         ${hour},
+                        "day_of_week":         ${dow},
+                        "diff_size":           ${env.GIT_DIFF_SIZE ?: 100},
+                        "files_changed":       ${env.GIT_FILES_CHANGED ?: 5},
+                        "is_hotfix":           ${isHotfix},
+                        "job_name":            "${env.JOB_NAME}",
+                        "build_number":        "${env.BUILD_NUMBER}",
+                        "branch_name":         "${env.BRANCH_NAME ?: 'unknown'}"
+                    }
+                    """
+
+                    def response = sh(
+                        script: """
+                            curl -s -X POST ${DEPLOY_GATE_URL}/score \\
+                                 -H 'Content-Type: application/json' \\
+                                 -d '${payload.replaceAll(/\s+/, ' ')}'
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    def result = readJSON text: response
+
+                    // Save build_id for outcome logger
+                    env.DG_BUILD_ID = result.build_id ?: ""
+
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "DEPLOY GATE RESULT"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "Score   : ${result.score} / 100"
+                    echo "Verdict : ${result.verdict}"
+                    echo "Model   : ${result.model_phase}"
+                    if (result.top_reasons) {
+                        echo "Top reasons:"
+                        result.top_reasons.each { r ->
+                            echo "  - ${r.label}: ${r.value_str}"
+                        }
+                    }
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+                    // Block if BLOCKED verdict (unless force override)
+                    if (result.verdict == "BLOCKED" && env.DEPLOY_FORCE != "true") {
+                        error("Deploy Gate blocked this deploy. Score: ${result.score}/100. Set DEPLOY_FORCE=true to override.")
+                    }
+
+                    if (result.verdict == "WARNING") {
+                        echo "WARNING: Elevated risk detected. Proceeding with caution."
+                    }
+                }
+            }
+        }
+        // ── END DEPLOY GATE STAGE ─────────────────────────────
+
+        stage('Deploy') {
+            steps {
+                echo "Deploying to production..."
+                // Your existing deploy steps here
+            }
+        }
+    }
+
+    // ── ADD THIS POST BLOCK ────────────────────────────────────
+    post {
+        always {
+            script {
+                // Outcome logger — records whether deploy succeeded or failed
+                // This is what trains the ML model over time
+                if (env.DG_BUILD_ID) {
+                    def label      = (currentBuild.result == 'SUCCESS') ? 0 : 1
+                    def labelSrc   = (currentBuild.result == 'SUCCESS') ? 'success' : 'failure'
+
+                    sh """
+                        curl -s -X POST ${DEPLOY_GATE_URL}/log \\
+                             -H 'Content-Type: application/json' \\
+                             -d '{
+                                 "tenant_id":    "${TENANT_ID}",
+                                 "api_key":      "${API_KEY}",
+                                 "build_id":     "${env.DG_BUILD_ID}",
+                                 "label":        ${label},
+                                 "label_source": "${labelSrc}"
+                             }'
+                    """
+                    echo "Deploy Gate: outcome logged (label=${label})"
+                }
+            }
+        }
+    }
+    // ── END POST BLOCK ─────────────────────────────────────────
+}

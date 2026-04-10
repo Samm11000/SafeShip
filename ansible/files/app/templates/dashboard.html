@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Smart Deploy Gate{% endblock %}
+{% block content %}
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1 style="font-size:22px;font-weight:600">Deploy Gate Dashboard</h1>
+    <p style="color:#888;font-size:13px;margin-top:2px">Tenant: <code>{{ tenant_id }}</code></p>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    {% if model_phase == 'tenant' %}
+      <span class="badge badge-purple">Personalised Model</span>
+    {% else %}
+      <span class="badge badge-gray">Base Model</span>
+    {% endif %}
+    <span class="badge badge-green">Precision: {{ precision }}%</span>
+  </div>
+</div>
+
+<!-- Metric cards -->
+<div class="grid-4" style="margin-bottom:16px">
+  <div class="metric">
+    <div class="metric-label">Total Builds</div>
+    <div class="metric-value">{{ build_count }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Labelled Builds</div>
+    <div class="metric-value">{{ labelled_count }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Model Precision</div>
+    <div class="metric-value">{{ precision }}%</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Model Phase</div>
+    <div class="metric-value" style="font-size:16px;padding-top:4px">
+      {% if model_phase == 'tenant' %}
+        <span style="color:#534AB7">Personalised</span>
+      {% else %}
+        <span style="color:#888">Base</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Progress toward personal model -->
+{% if model_phase == 'base' %}
+<div class="card" style="margin-bottom:16px">
+  <div class="card-title">Progress to Personalised Model</div>
+  <div style="display:flex;justify-content:space-between;font-size:13px;color:#666;margin-bottom:6px">
+    <span>{{ labelled_count }} labelled builds</span>
+    <span>Goal: 80 builds</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-fill" style="width:{{ progress_pct }}%"></div>
+  </div>
+  <p style="font-size:12px;color:#888;margin-top:6px">
+    {% if labelled_count >= 80 %}
+      Retrain will run tonight at 2am UTC automatically.
+    {% else %}
+      {{ 80 - labelled_count }} more labelled builds needed. Model retrains nightly at 2am UTC.
+    {% endif %}
+  </p>
+</div>
+{% endif %}
+
+<div class="grid-2">
+  <!-- Risk score history chart -->
+  <div class="card">
+    <div class="card-title">Risk Score History (last 30 builds)</div>
+    {% if build_count == 0 %}
+      <div style="text-align:center;padding:40px;color:#aaa">
+        <div style="font-size:32px;margin-bottom:8px">📊</div>
+        <p>No builds yet. Add the Jenkinsfile stage below to start scoring.</p>
+      </div>
+    {% else %}
+      <canvas id="scoreChart" height="200"></canvas>
+    {% endif %}
+  </div>
+
+  <!-- Feature importance chart -->
+  <div class="card">
+    <div class="card-title">What Drives Your Scores</div>
+    {% if feat_names != '[]' %}
+      <canvas id="featChart" height="200"></canvas>
+    {% else %}
+      <div style="text-align:center;padding:40px;color:#aaa">Loading feature data...</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Recent builds table -->
+<div class="card">
+  <div class="card-title">Recent Builds</div>
+  {% if recent_builds %}
+  <table>
+    <thead>
+      <tr>
+        <th>Build ID</th>
+        <th>Score</th>
+        <th>Verdict</th>
+        <th>Label</th>
+        <th>Diff Size</th>
+        <th>Failure Rate</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in recent_builds %}
+      <tr>
+        <td><code style="font-size:11px">{{ b.build_id[:16] if b.build_id else '-' }}...</code></td>
+        <td>
+          {% set s = b.predicted_score|int %}
+          <strong style="color:{% if s <= 40 %}#3B6D11{% elif s <= 70 %}#854F0B{% else %}#A32D2D{% endif %}">
+            {{ s }}/100
+          </strong>
+        </td>
+        <td>
+          {% set s = b.predicted_score|int %}
+          {% if s <= 40 %}
+            <span class="badge badge-green">SAFE</span>
+          {% elif s <= 70 %}
+            <span class="badge badge-yellow">WARNING</span>
+          {% else %}
+            <span class="badge badge-red">BLOCKED</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if b.label == '1' %}
+            <span class="badge badge-red">Risky</span>
+          {% elif b.label == '0' %}
+            <span class="badge badge-green">Safe</span>
+          {% else %}
+            <span class="badge badge-gray">Pending</span>
+          {% endif %}
+        </td>
+        <td>{{ b.diff_size }} lines</td>
+        <td>{{ (b.recent_failure_rate|float * 100)|int }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#aaa;text-align:center;padding:24px">No builds recorded yet.</p>
+  {% endif %}
+</div>
+
+<!-- Settings -->
+<div class="card">
+  <div class="card-title">Settings</div>
+  <div class="grid-2">
+    <div>
+      <label style="font-size:13px;color:#666;display:block;margin-bottom:6px">Slack Webhook URL</label>
+      <input type="text" id="slack-webhook" value="{{ slack_webhook }}"
+             placeholder="https://hooks.slack.com/services/..."/>
+      <p style="font-size:11px;color:#aaa;margin-top:4px">
+        In Slack: Apps → Incoming Webhooks → Add. Paste URL here.
+      </p>
+    </div>
+    <div>
+      <label style="font-size:13px;color:#666;display:block;margin-bottom:6px">
+        Yellow threshold: <strong id="yellow-val">{{ thresh_yellow }}</strong>
+      </label>
+      <input type="range" id="thresh-yellow" min="20" max="60" value="{{ thresh_yellow }}"
+             oninput="document.getElementById('yellow-val').textContent=this.value"
+             style="width:100%;margin-bottom:12px"/>
+      <label style="font-size:13px;color:#666;display:block;margin-bottom:6px">
+        Red threshold: <strong id="red-val">{{ thresh_red }}</strong>
+      </label>
+      <input type="range" id="thresh-red" min="50" max="90" value="{{ thresh_red }}"
+             oninput="document.getElementById('red-val').textContent=this.value"
+             style="width:100%"/>
+    </div>
+  </div>
+  <button class="btn btn-primary" style="margin-top:16px" onclick="saveSettings()">Save Settings</button>
+  <span id="save-msg" style="font-size:13px;color:#3B6D11;margin-left:12px;display:none">Saved!</span>
+</div>
+
+<!-- Jenkinsfile snippet -->
+<div class="card">
+  <div class="card-title">Your Jenkinsfile Stage</div>
+  <p style="font-size:13px;color:#666;margin-bottom:12px">
+    Copy this stage into your Jenkins pipeline. Replace <code>YOUR-EC2-IP</code> with your server address after deployment.
+  </p>
+  <pre id="jf-snippet">{{ jenkinsfile }}</pre>
+  <button class="btn btn-secondary" style="margin-top:12px" onclick="copySnippet()">Copy to Clipboard</button>
+  <span id="copy-msg" style="font-size:13px;color:#3B6D11;margin-left:12px;display:none">Copied!</span>
+</div>
+
+<script>
+const TENANT_ID = "{{ tenant_id }}";
+const API_KEY   = "{{ api_key }}";
+
+// Score history chart
+{% if build_count > 0 %}
+const scores   = {{ scores }};
+const bNums    = {{ build_nums }};
+const bColors  = {{ colors }};
+new Chart(document.getElementById('scoreChart'), {
+  type: 'bar',
+  data: {
+    labels:   bNums,
+    datasets: [{
+      label:           'Risk Score',
+      data:            scores,
+      backgroundColor: bColors,
+      borderRadius:    4,
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { min: 0, max: 100, grid: { color: '#f0f0f0' } },
+      x: { grid: { display: false } }
+    }
+  }
+});
+{% endif %}
+
+// Feature importance chart
+const featNames  = {{ feat_names }};
+const featValues = {{ feat_values }};
+if (featNames.length > 0) {
+  new Chart(document.getElementById('featChart'), {
+    type: 'bar',
+    data: {
+      labels:   featNames,
+      datasets: [{
+        label:           'Importance %',
+        data:            featValues,
+        backgroundColor: '#534AB7',
+        borderRadius:    4,
+      }]
+    },
+    options: {
+      indexAxis:  'y',
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: { color: '#f0f0f0' } }, y: { grid: { display: false } } }
+    }
+  });
+}
+
+async function saveSettings() {
+  const webhook = document.getElementById('slack-webhook').value;
+  const yellow  = parseInt(document.getElementById('thresh-yellow').value);
+  const red     = parseInt(document.getElementById('thresh-red').value);
+
+  const r = await fetch('/settings', {
+    method:  'POST',
+    headers: {'Content-Type':'application/json'},
+    body:    JSON.stringify({
+      tenant_id: TENANT_ID, api_key: API_KEY,
+      slack_webhook: webhook, threshold_yellow: yellow, threshold_red: red
+    })
+  });
+  if (r.ok) {
+    const msg = document.getElementById('save-msg');
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 2000);
+  }
+}
+
+function copySnippet() {
+  const text = document.getElementById('jf-snippet').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const msg = document.getElementById('copy-msg');
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 2000);
+  });
+}
+</script>
+{% endblock %}

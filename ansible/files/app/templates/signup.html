@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Smart Deploy Gate — Get Started{% endblock %}
+{% block content %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<div style="max-width:520px;margin:60px auto">
+  <div style="text-align:center;margin-bottom:32px">
+    <div style="font-size:40px;margin-bottom:12px">🚦</div>
+    <h1 style="font-size:28px;font-weight:700;margin-bottom:8px">Smart Deploy Gate</h1>
+    <p style="color:#666;font-size:16px">ML-powered risk scoring for every Jenkins deploy.<br/>Free. Self-hosted. Gets smarter every night.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Get your API Key</div>
+    <p style="font-size:14px;color:#666;margin-bottom:16px">Enter your email (optional) and get an API key instantly. No credit card. No OAuth.</p>
+    <input type="email" id="email" placeholder="your@email.com (optional)" style="margin-bottom:12px"/>
+    <button class="btn btn-primary" style="width:100%;padding:12px" onclick="signup()">Get API Key →</button>
+  </div>
+
+  <div class="card" id="result-card" style="display:none">
+    <div class="card-title">Your Credentials — Save These Now</div>
+    <div style="background:#f8f8f8;border-radius:8px;padding:14px;margin-bottom:12px">
+      <div style="font-size:12px;color:#888;margin-bottom:4px">Tenant ID</div>
+      <code id="out-tenant" style="font-size:15px;font-weight:600;color:#534AB7"></code>
+    </div>
+    <div style="background:#f8f8f8;border-radius:8px;padding:14px;margin-bottom:16px">
+      <div style="font-size:12px;color:#888;margin-bottom:4px">API Key (shown once only)</div>
+      <code id="out-key" style="font-size:15px;font-weight:600;color:#534AB7"></code>
+    </div>
+    <div class="alert alert-success" style="margin-bottom:16px">Save your API key now — it will not be shown again.</div>
+    <a id="dash-link" href="#" class="btn btn-primary" style="width:100%;text-align:center;display:block;padding:12px">Go to Dashboard →</a>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Already have credentials?</div>
+    <input type="text" id="existing-tenant" placeholder="Tenant ID" style="margin-bottom:8px"/>
+    <input type="text" id="existing-key"    placeholder="API Key"   style="margin-bottom:12px"/>
+    <button class="btn btn-secondary" style="width:100%" onclick="goToDashboard()">Open Dashboard →</button>
+  </div>
+
+  <div style="margin-top:24px">
+    <div class="card-title" style="margin-bottom:12px">How it works</div>
+    <div class="grid-3">
+      <div style="text-align:center;padding:16px">
+        <div style="font-size:24px;margin-bottom:8px">1</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Get API key</div>
+        <div style="font-size:12px;color:#888">Takes 10 seconds</div>
+      </div>
+      <div style="text-align:center;padding:16px">
+        <div style="font-size:24px;margin-bottom:8px">2</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Add to Jenkinsfile</div>
+        <div style="font-size:12px;color:#888">Copy-paste one stage</div>
+      </div>
+      <div style="text-align:center;padding:16px">
+        <div style="font-size:24px;margin-bottom:8px">3</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">It learns your team</div>
+        <div style="font-size:12px;color:#888">Gets smarter every night</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function signup() {
+  const email = document.getElementById('email').value;
+  const btn   = event.target;
+  btn.textContent = 'Creating...';
+  btn.disabled    = true;
+
+  try {
+    const r    = await fetch('/signup', {
+      method:  'POST',
+      headers: {'Content-Type':'application/json'},
+      body:    JSON.stringify({email})
+    });
+    const data = await r.json();
+
+    document.getElementById('out-tenant').textContent = data.tenant_id;
+    document.getElementById('out-key').textContent    = data.api_key;
+    document.getElementById('dash-link').href =
+      `/dashboard?tenant_id=${data.tenant_id}&api_key=${data.api_key}`;
+    document.getElementById('result-card').style.display = 'block';
+    document.getElementById('result-card').scrollIntoView({behavior:'smooth'});
+  } catch(e) {
+    alert('Error creating account. Please try again.');
+  } finally {
+    btn.textContent = 'Get API Key →';
+    btn.disabled    = false;
+  }
+}
+
+function goToDashboard() {
+  const tid = document.getElementById('existing-tenant').value.trim();
+  const key = document.getElementById('existing-key').value.trim();
+  if (!tid || !key) { alert('Enter both Tenant ID and API Key'); return; }
+  window.location.href = `/dashboard?tenant_id=${tid}&api_key=${key}`;
+}
+</script>
+{% endblock %}
