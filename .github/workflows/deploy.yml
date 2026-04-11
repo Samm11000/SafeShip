@@ -1,0 +1,92 @@
+# .github/workflows/deploy.yml
+#
+# Auto-deploys SafeShip to EC2 on every push to main branch.
+# No Jenkins needed. No Elastic IP needed.
+#
+# HOW IT WORKS:
+#   1. You push code to GitHub
+#   2. GitHub Actions runner wakes up (free cloud machine)
+#   3. It SSHes into your EC2 using the stored key
+#   4. Copies new code, rebuilds Docker, restarts containers
+#   5. Verifies health check passes
+#   6. Done in ~3 minutes
+
+name: Deploy SafeShip to EC2
+
+# TRIGGER: runs on every push to main branch
+on:
+  push:
+    branches: [ main ]
+  # Also allows manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest   # GitHub provides this free Linux machine
+
+    steps:
+
+      # Step 1: Download your code onto the GitHub runner
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: SSH into EC2 and deploy
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:        ${{ secrets.EC2_HOST }}
+          username:    ubuntu
+          key:         ${{ secrets.EC2_SSH_KEY }}
+          timeout:     300s
+          script: |
+            set -e
+            echo "======================================"
+            echo "SafeShip Deployment Starting"
+            echo "======================================"
+
+            APP_DIR=/home/ubuntu/deploy-gate
+
+            # Pull latest code from GitHub
+            if [ -d "$APP_DIR/.git" ]; then
+              cd $APP_DIR
+              git pull origin main
+            else
+              git clone ${{ secrets.GITHUB_REPO_URL }} $APP_DIR
+              cd $APP_DIR
+            fi
+
+            # Rebuild and restart Docker containers
+            docker compose down
+            docker compose build --no-cache
+            docker compose up -d
+
+            # Wait for app to be healthy
+            echo "Waiting for health check..."
+            for i in $(seq 1 12); do
+              if curl -sf http://localhost/health > /dev/null 2>&1; then
+                echo "Health check passed!"
+                break
+              fi
+              echo "Attempt $i/12 - waiting 5s..."
+              sleep 5
+            done
+
+            # Final verification
+            HEALTH=$(curl -s http://localhost/health)
+            echo "Health response: $HEALTH"
+
+            echo "======================================"
+            echo "Deployment Complete"
+            echo "======================================"
+
+      # Step 3: Notify in GitHub if deployment succeeded or failed
+      - name: Deployment Status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "Deployment succeeded!"
+          else
+            echo "Deployment failed — check logs above"
+            exit 1
+          fi

@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}About — Smart Deploy Gate{% endblock %}
+{% block content %}
+
+<div class="container section">
+
+  <!-- Header -->
+  <div style="max-width:640px;margin-bottom:64px;animation:fadeInUp 0.5s ease forwards">
+    <div class="section-tag">About</div>
+    <h1 class="section-title">Built by a DevOps engineer<br/>who got paged at 3am</h1>
+    <p style="font-size:17px;color:rgba(232,244,248,0.6);line-height:1.8;margin-top:16px">
+      Smart Deploy Gate exists because "it worked on Friday afternoon" is not a deployment strategy.
+      We built ML that learns when your team ships safely — and when they don't.
+    </p>
+  </div>
+
+  <!-- Mission -->
+  <div class="grid-2" style="gap:32px;margin-bottom:64px">
+    <div class="card" style="border-color:var(--border2);padding:40px">
+      <div class="card-title">The Problem</div>
+      <p style="font-size:15px;color:rgba(232,244,248,0.65);line-height:1.8;margin-bottom:20px">
+        Every engineering team has the same story. A deploy goes out Friday at 5pm.
+        The diff was "small." The tests passed. By Saturday morning, production is down.
+      </p>
+      <p style="font-size:15px;color:rgba(232,244,248,0.65);line-height:1.8">
+        The signals were all there — high recent failure rate, end-of-day timing, rushed commit.
+        But nobody was reading them. Now a machine does.
+      </p>
+    </div>
+    <div class="card" style="padding:40px">
+      <div class="card-title">The Solution</div>
+      <p style="font-size:15px;color:rgba(232,244,248,0.65);line-height:1.8;margin-bottom:20px">
+        A Random Forest model that scores every deploy before it runs.
+        Trained on your team's own build history. Gets smarter every night.
+        Integrates with Jenkins in one pipeline stage.
+      </p>
+      <p style="font-size:15px;color:rgba(232,244,248,0.65);line-height:1.8">
+        No SaaS subscription. No data leaving your infrastructure. No ML expertise required.
+        Just add the stage, get the score, ship with confidence.
+      </p>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- How the ML works -->
+  <div style="margin-bottom:64px">
+    <div class="section-tag">The ML Engine</div>
+    <h2 class="section-title" style="margin-bottom:40px">How the model works</h2>
+
+    <div class="grid-2" style="gap:16px">
+      <div>
+        <div class="phase-row" style="margin-bottom:0">
+          <div class="phase-label" style="font-size:10px">Algorithm</div>
+          <div class="phase-content">Random Forest Classifier — 100 trees, depth 8, balanced class weights</div>
+        </div>
+        <div class="phase-row" style="margin-bottom:0">
+          <div class="phase-label" style="font-size:10px">Precision</div>
+          <div class="phase-content" style="color:var(--green)">85.1% on base model — above industry average</div>
+        </div>
+        <div class="phase-row" style="margin-bottom:0">
+          <div class="phase-label" style="font-size:10px">AUC-ROC</div>
+          <div class="phase-content" style="color:var(--green)">0.934 — near-perfect risk separation</div>
+        </div>
+        <div class="phase-row" style="margin-bottom:0">
+          <div class="phase-label" style="font-size:10px">Imbalance fix</div>
+          <div class="phase-content">SMOTE oversampling — prevents "always safe" predictions</div>
+        </div>
+        <div class="phase-row" style="margin-bottom:0">
+          <div class="phase-label" style="font-size:10px">Retraining</div>
+          <div class="phase-content">Nightly cron at 2am UTC — 5-check validation gate before swap</div>
+        </div>
+        <div class="phase-row" style="margin-bottom:0">
+          <div class="phase-label" style="font-size:10px">Drift detection</div>
+          <div class="phase-content">Weekly KS-test on 10 features — alerts and forces retrain if detected</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:32px">
+        <div class="card-title">10 Features Scored</div>
+        {% for f in [
+          ('diff_size',           'Lines added + removed in commit'),
+          ('files_changed',       'Number of files touched'),
+          ('hour_of_day',         'Time of day when triggered'),
+          ('day_of_week',         'Monday=safe, Friday=risky'),
+          ('recent_failure_rate', 'Failures in last 10 builds'),
+          ('test_pass_rate',      'Test suite pass percentage'),
+          ('is_hotfix',           'Hotfix/fix/patch branch flag'),
+          ('deployer_exp',        'Past deploy count for this user'),
+          ('days_since_deploy',   'Days since last successful deploy'),
+          ('build_time_delta',    'Current vs average build duration'),
+        ] %}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(0,200,255,0.06)">
+          <code style="font-size:11px;color:var(--cyan)">{{ f[0] }}</code>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">{{ f[1] }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Architecture -->
+  <div style="margin-bottom:64px">
+    <div class="section-tag">Architecture</div>
+    <h2 class="section-title" style="margin-bottom:40px">What's running<br/>under the hood</h2>
+
+    <div class="grid-3">
+      {% for item in [
+        ('Scoring API', 'Flask + Gunicorn on EC2 t2.micro. Nginx reverse proxy. Model loaded in memory, refreshed every 5 min from S3.', 'cyan'),
+        ('Data Storage', 'S3 for model files and build CSVs. DynamoDB for tenant registry. All in ap-south-1.', 'amber'),
+        ('MLOps Loop', 'EC2 cron at 2am retrains all qualified tenants. 5-check validation gate. Atomic model swap via S3.', 'green'),
+      ] %}
+      <div class="card" style="padding:28px">
+        <div class="card-title" style="color:var(--{{ item[2] }})">{{ item[0] }}</div>
+        <p style="font-size:13px;color:rgba(232,244,248,0.6);line-height:1.8;font-family:var(--mono)">{{ item[1] }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- CTA -->
+  <div class="card" style="text-align:center;padding:48px;border-color:var(--border2)">
+    <div class="section-tag" style="justify-content:center">Open source</div>
+    <h2 style="font-size:32px;font-weight:800;margin-bottom:16px">Self-host it.<br/>Own your data.</h2>
+    <p style="font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:32px;line-height:1.8">
+      All code is open source. Deploy to your own AWS account.<br/>
+      No build data ever leaves your infrastructure.
+    </p>
+    <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
+      <a href="/" class="btn-primary">Get Started Free</a>
+      <a href="/demo" class="btn-ghost">Try Live Demo →</a>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

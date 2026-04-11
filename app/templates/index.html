@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}SafeShip — ML-Powered Deploy Risk Intelligence{% endblock %}
+{% block head %}
+<style>
+.hero {
+  min-height: calc(100vh - 60px);
+  display: flex; align-items: center;
+  position: relative; overflow: hidden; padding: 80px 0;
+}
+.hero-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(99,179,255,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99,179,255,0.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 100% 100% at 50% 50%, black 30%, transparent 80%);
+}
+.hero-glow {
+  position: absolute;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(99,179,255,0.07) 0%, transparent 70%);
+  top: -100px; right: -100px; pointer-events: none;
+}
+.hero-content { position: relative; z-index: 1; max-width: 600px; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 3px;
+  color: var(--cyan); text-transform: uppercase; margin-bottom: 24px;
+  display: flex; align-items: center; gap: 10px;
+  animation: fadeInUp 0.4s ease 0.1s forwards; opacity: 0;
+}
+.hero-eyebrow .dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; animation: pulse-dot 1.5s ease-in-out infinite; }
+.hero-title {
+  font-size: clamp(44px, 6.5vw, 80px); font-weight: 800;
+  line-height: 1.0; letter-spacing: -3px; margin-bottom: 24px;
+  animation: fadeInUp 0.4s ease 0.2s forwards; opacity: 0;
+}
+.hero-title .accent { color: var(--cyan); }
+.hero-title .dim { color: rgba(220,232,245,0.35); display: block; }
+.hero-desc {
+  font-size: 16px; color: rgba(220,232,245,0.55); line-height: 1.75;
+  margin-bottom: 40px; font-family: var(--mono);
+  animation: fadeInUp 0.4s ease 0.3s forwards; opacity: 0;
+}
+.hero-actions { display: flex; gap: 12px; flex-wrap: wrap; animation: fadeInUp 0.4s ease 0.4s forwards; opacity: 0; }
+.hero-visual {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: 400px; animation: fadeIn 0.7s ease 0.5s forwards; opacity: 0;
+}
+.score-card {
+  background: var(--bg2); border: 1px solid var(--border); padding: 24px;
+  position: relative;
+}
+.score-card-top {
+  position: absolute; top: -1px; left: 24px; right: 24px; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--red), transparent);
+}
+.score-card-header {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 18px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.live-pill { display: flex; align-items: center; gap: 5px; color: var(--green); }
+.live-dot  { width: 5px; height: 5px; background: var(--green); border-radius: 50%; animation: pulse-dot 1.2s ease-in-out infinite; }
+.score-num { font-family: var(--mono); font-size: 80px; font-weight: 700; line-height: 1; color: var(--red); text-shadow: 0 0 48px rgba(255,77,106,0.45); }
+.score-verdict { font-family: var(--mono); font-size: 10px; letter-spacing: 3px; color: var(--red); text-transform: uppercase; margin: 6px 0 18px; }
+.reason-row { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(99,179,255,0.05); font-family: var(--mono); }
+.reason-row:last-child { border-bottom: none; }
+.reason-n { color: var(--muted); font-size: 10px; min-width: 18px; padding-top: 1px; }
+.reason-t { font-size: 11px; color: var(--text); }
+.reason-v { font-size: 10px; color: var(--amber); margin-top: 2px; }
+.stats-row { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 20px 0; }
+.stats-inner { display: grid; grid-template-columns: repeat(4,1fr); }
+.stat-item { padding: 0 28px; border-right: 1px solid var(--border); text-align: center; }
+.stat-item:last-child { border-right: none; }
+.stat-num { font-family: var(--mono); font-size: 28px; font-weight: 700; color: var(--cyan); }
+.stat-lbl { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 4px; }
+.step-card { background: var(--bg2); border: 1px solid var(--border); padding: 28px; transition: border-color 0.2s, transform 0.2s; }
+.step-card:hover { border-color: var(--border2); transform: translateY(-3px); }
+.step-n { font-family: var(--mono); font-size: 48px; font-weight: 700; color: rgba(99,179,255,0.07); line-height: 1; margin-bottom: 12px; }
+.step-t { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+.step-d { font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.8; }
+</style>
+{% endblock %}
+{% block content %}
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-grid"></div>
+  <div class="hero-glow"></div>
+  <div class="container" style="position:relative;z-index:1">
+    <div class="hero-content">
+      <div class="hero-eyebrow"><span class="dot"></span>ML-Powered Deploy Risk Intelligence</div>
+      <h1 class="hero-title">
+        Ship code.<br/>
+        Not <span class="accent">incidents.</span>
+        <span class="dim">Every deploy, scored.</span>
+      </h1>
+      <p class="hero-desc">
+        SafeShip scores every Jenkins deploy 0–100 before it runs.<br/>
+        Learns your team's patterns overnight. Blocks risky deploys automatically.<br/>
+        Free. Self-hosted. Gets smarter every day.
+      </p>
+      <div class="hero-actions">
+        <a href="/signup" class="btn-primary">Get API Key — Free</a>
+        <a href="/demo" class="btn-ghost">Try Live Demo →</a>
+      </div>
+    </div>
+
+    <div class="hero-visual">
+      <div class="score-card">
+        <div class="score-card-top"></div>
+        <div class="score-card-header">
+          <span>payments-service #142</span>
+          <span class="live-pill"><span class="live-dot"></span>LIVE</span>
+        </div>
+        <div class="score-num">93</div>
+        <div class="score-verdict">⛔ Deploy Blocked</div>
+        <div class="reason-row">
+          <span class="reason-n">01</span>
+          <div><div class="reason-t">Recent failure rate</div><div class="reason-v">40% of last 10 builds failed</div></div>
+        </div>
+        <div class="reason-row">
+          <span class="reason-n">02</span>
+          <div><div class="reason-t">Diff size</div><div class="reason-v">847 lines changed (very large)</div></div>
+        </div>
+        <div class="reason-row">
+          <span class="reason-n">03</span>
+          <div><div class="reason-t">Time of deploy</div><div class="reason-v">Friday 5:00 PM (end of day)</div></div>
+        </div>
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--muted)">
+          Base model • Override: DEPLOY_FORCE=true
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="stats-row">
+  <div class="container">
+    <div class="stats-inner">
+      <div class="stat-item"><div class="stat-num">85.1%</div><div class="stat-lbl">Model Precision</div></div>
+      <div class="stat-item"><div class="stat-num">0.934</div><div class="stat-lbl">AUC-ROC Score</div></div>
+      <div class="stat-item"><div class="stat-num">&lt;200ms</div><div class="stat-lbl">Score Latency</div></div>
+      <div class="stat-item"><div class="stat-num">$0</div><div class="stat-lbl">Monthly Cost</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<section class="section">
+  <div class="container">
+    <div class="section-tag">How it works</div>
+    <h2 class="section-title">Live in 5 minutes.<br/>Smarter every night.</h2>
+    <p style="font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:48px;line-height:1.8;max-width:480px">
+      One API key. One Jenkinsfile stage. SafeShip handles the rest.
+    </p>
+    <div class="grid-3">
+      <div class="step-card">
+        <div class="step-n">01</div>
+        <div class="step-t">Get your API key</div>
+        <p class="step-d">10 seconds. No credit card, no OAuth, no setup wizard. Email optional. Get your tenant_id and api_key instantly.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-n">02</div>
+        <div class="step-t">Add one pipeline stage</div>
+        <p class="step-d">Copy the pre-filled Jenkinsfile stage from your dashboard. Paste it. Commit. Every deploy now gets scored before running.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-n">03</div>
+        <div class="step-t">Model learns your team</div>
+        <p class="step-d">Every deploy is logged. Every outcome recorded. Every night at 2am the model retrains on your data automatically.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ML LIFECYCLE -->
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div class="section-tag">ML Lifecycle</div>
+    <h2 class="section-title" style="margin-bottom:36px">Gets smarter<br/>over time</h2>
+    <div class="phase-row"><div class="phase-label">Day 1</div><div class="phase-content"><span class="phase-tag">Base model</span>Universal risk patterns. Precision ~65%. Useful from minute one.</div></div>
+    <div class="phase-row"><div class="phase-label">~Day 10</div><div class="phase-content"><span class="phase-tag">80 labelled builds</span>Nightly retrain triggers. Your team's specific patterns emerge.</div></div>
+    <div class="phase-row"><div class="phase-label">Month 2</div><div class="phase-content"><span class="phase-tag">Personalised model</span>Knows your services, your deployers, your risk patterns. Precision ~80%+.</div></div>
+    <div class="phase-row" style="margin-bottom:0"><div class="phase-label">Month 6+</div><div class="phase-content"><span class="phase-tag">Drift detection</span>Weekly KS-test across 10 features. Auto-retrains if patterns shift.</div></div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- CTA -->
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div class="card" style="text-align:center;padding:64px;border-color:var(--border2)">
+      <div class="section-tag" style="justify-content:center">Ready?</div>
+      <h2 class="section-title">Your next deploy<br/>deserves a score</h2>
+      <p style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:36px;max-width:360px;margin-left:auto;margin-right:auto;line-height:1.9">
+        Free. Self-hosted. Your data stays in your infra.<br/>Add to Jenkins in under 5 minutes.
+      </p>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a href="/signup" class="btn-primary">Get API Key — Free</a>
+        <a href="/demo" class="btn-ghost">Try Demo First →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
