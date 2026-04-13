@@ -1,134 +1,212 @@
 {% extends "base.html" %}
-{% block title %}SafeShip — ML-Powered Deploy Risk Intelligence{% endblock %}
+{% block title %}SafeShip — Ship Code. Not Incidents.{% endblock %}
 {% block head %}
 <style>
+/* BLOBS */
+.blob-container {
+  position: absolute; inset: 0; overflow: hidden;
+  pointer-events: none; z-index: 0;
+}
+.blob {
+  position: absolute; border-radius: 50%;
+  filter: blur(60px); opacity: 0.35;
+}
+.blob-1 { width: 500px; height: 500px; background: radial-gradient(circle, #c7d2fe, #a5b4fc); top: -100px; right: -100px; animation: float 8s ease-in-out infinite; }
+.blob-2 { width: 380px; height: 380px; background: radial-gradient(circle, #ddd6fe, #c4b5fd); bottom: -80px; left: -80px; animation: float2 10s ease-in-out infinite; }
+.blob-3 { width: 280px; height: 280px; background: radial-gradient(circle, #fde68a, #fcd34d); top: 40%; right: 30%; animation: float3 7s ease-in-out infinite; opacity: 0.2; }
+
+/* HERO */
 .hero {
   min-height: calc(100vh - 60px);
-  display: flex; align-items: center;
-  position: relative; overflow: hidden; padding: 80px 0;
+  display: grid; grid-template-columns: 1fr 420px;
+  gap: 60px; align-items: center;
+  position: relative; padding: 80px 0;
 }
-.hero-grid {
-  position: absolute; inset: 0;
-  background-image:
-    linear-gradient(rgba(99,179,255,0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(99,179,255,0.035) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(ellipse 100% 100% at 50% 50%, black 30%, transparent 80%);
-}
-.hero-glow {
-  position: absolute;
-  width: 600px; height: 600px;
-  background: radial-gradient(circle, rgba(99,179,255,0.07) 0%, transparent 70%);
-  top: -100px; right: -100px; pointer-events: none;
-}
-.hero-content { position: relative; z-index: 1; max-width: 600px; }
 .hero-eyebrow {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 3px;
-  color: var(--cyan); text-transform: uppercase; margin-bottom: 24px;
-  display: flex; align-items: center; gap: 10px;
-  animation: fadeInUp 0.4s ease 0.1s forwards; opacity: 0;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #e0e7ff; color: var(--accent);
+  font-family: var(--mono); font-size: 11px;
+  padding: 5px 14px; border-radius: 100px; letter-spacing: 1px;
+  margin-bottom: 24px;
+  animation: fadeInUp 0.4s ease 0.1s both;
 }
-.hero-eyebrow .dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; animation: pulse-dot 1.5s ease-in-out infinite; }
+.hero-eyebrow .pulse { width: 6px; height: 6px; background: var(--green); border-radius: 50%; animation: pulse-ring 2s ease-in-out infinite; }
+@keyframes pulse-ring { 0%,100%{box-shadow:0 0 0 0 rgba(22,163,74,0.4)} 50%{box-shadow:0 0 0 6px rgba(22,163,74,0)} }
+
 .hero-title {
-  font-size: clamp(44px, 6.5vw, 80px); font-weight: 800;
-  line-height: 1.0; letter-spacing: -3px; margin-bottom: 24px;
-  animation: fadeInUp 0.4s ease 0.2s forwards; opacity: 0;
+  font-size: clamp(48px, 6vw, 76px); font-weight: 900;
+  line-height: 1.0; letter-spacing: -3px; margin-bottom: 20px;
+  animation: fadeInUp 0.4s ease 0.2s both;
 }
-.hero-title .accent { color: var(--cyan); }
-.hero-title .dim { color: rgba(220,232,245,0.35); display: block; }
+.hero-title .accent { color: var(--accent); }
+.hero-title .line2   { color: var(--muted); font-weight: 400; font-size: 0.6em; display: block; letter-spacing: -1px; margin-top: 4px; }
+
 .hero-desc {
-  font-size: 16px; color: rgba(220,232,245,0.55); line-height: 1.75;
-  margin-bottom: 40px; font-family: var(--mono);
-  animation: fadeInUp 0.4s ease 0.3s forwards; opacity: 0;
+  font-size: 17px; color: var(--ink2); line-height: 1.7;
+  margin-bottom: 36px; max-width: 480px;
+  animation: fadeInUp 0.4s ease 0.3s both;
 }
-.hero-actions { display: flex; gap: 12px; flex-wrap: wrap; animation: fadeInUp 0.4s ease 0.4s forwards; opacity: 0; }
-.hero-visual {
-  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
-  width: 400px; animation: fadeIn 0.7s ease 0.5s forwards; opacity: 0;
-}
+.hero-actions { display: flex; gap: 12px; flex-wrap: wrap; animation: fadeInUp 0.4s ease 0.4s both; }
+
+/* SCORE CARD */
+.score-card-wrap { animation: fadeIn 0.6s ease 0.5s both; position: relative; }
 .score-card {
-  background: var(--bg2); border: 1px solid var(--border); padding: 24px;
-  position: relative;
+  background: var(--bg2); border-radius: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow2), 0 0 0 1px rgba(255,255,255,0.8) inset;
+  padding: 28px; overflow: hidden; position: relative;
 }
-.score-card-top {
-  position: absolute; top: -1px; left: 24px; right: 24px; height: 2px;
-  background: linear-gradient(90deg, transparent, var(--red), transparent);
+.score-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--red), #f97316, var(--red));
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
 }
-.score-card-header {
-  font-family: var(--mono); font-size: 10px; color: var(--muted);
-  letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 18px;
+@keyframes shimmer { 0%,100%{background-position:0% 0%} 50%{background-position:100% 0%} }
+
+.card-topbar {
   display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 20px; font-family: var(--mono); font-size: 11px; color: var(--muted);
 }
-.live-pill { display: flex; align-items: center; gap: 5px; color: var(--green); }
-.live-dot  { width: 5px; height: 5px; background: var(--green); border-radius: 50%; animation: pulse-dot 1.2s ease-in-out infinite; }
-.score-num { font-family: var(--mono); font-size: 80px; font-weight: 700; line-height: 1; color: var(--red); text-shadow: 0 0 48px rgba(255,77,106,0.45); }
-.score-verdict { font-family: var(--mono); font-size: 10px; letter-spacing: 3px; color: var(--red); text-transform: uppercase; margin: 6px 0 18px; }
-.reason-row { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(99,179,255,0.05); font-family: var(--mono); }
-.reason-row:last-child { border-bottom: none; }
-.reason-n { color: var(--muted); font-size: 10px; min-width: 18px; padding-top: 1px; }
-.reason-t { font-size: 11px; color: var(--text); }
-.reason-v { font-size: 10px; color: var(--amber); margin-top: 2px; }
-.stats-row { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 20px 0; }
+.live-badge {
+  display: flex; align-items: center; gap: 5px;
+  background: #dcfce7; color: var(--green);
+  padding: 4px 10px; border-radius: 100px; font-size: 10px; font-weight: 500;
+}
+.live-badge .dot { width: 5px; height: 5px; background: var(--green); border-radius: 50%; animation: pulse-ring 1.5s ease-in-out infinite; }
+
+.big-score { font-family: var(--mono); font-size: 96px; font-weight: 500; color: var(--red); line-height: 1; margin-bottom: 4px; }
+.verdict-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #fee2e2; color: var(--red);
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  padding: 5px 14px; border-radius: 100px; margin-bottom: 20px;
+}
+
+.reason-item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.reason-item:last-child { border-bottom: none; }
+.reason-idx { font-family: var(--mono); font-size: 10px; color: var(--muted); min-width: 20px; padding-top: 2px; font-weight: 500; }
+.reason-label { font-family: var(--mono); font-size: 12px; color: var(--ink); margin-bottom: 2px; }
+.reason-val   { font-family: var(--mono); font-size: 11px; color: var(--amber); }
+
+/* FLOATING CARD DECORATION */
+.mini-card {
+  position: absolute; background: var(--bg2);
+  border-radius: 12px; border: 1px solid var(--border);
+  box-shadow: var(--shadow2); padding: 12px 16px;
+  font-family: var(--mono); font-size: 11px;
+}
+.mini-card-1 {
+  top: -20px; left: -30px;
+  animation: float2 6s ease-in-out infinite;
+}
+.mini-card-2 {
+  bottom: -16px; right: -20px;
+  animation: float 7s ease-in-out 1s infinite;
+}
+
+/* STATS */
+.stats-strip {
+  background: var(--bg2); border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); padding: 20px 0;
+}
 .stats-inner { display: grid; grid-template-columns: repeat(4,1fr); }
-.stat-item { padding: 0 28px; border-right: 1px solid var(--border); text-align: center; }
+.stat-item { padding: 0 32px; border-right: 1px solid var(--border); text-align: center; }
 .stat-item:last-child { border-right: none; }
-.stat-num { font-family: var(--mono); font-size: 28px; font-weight: 700; color: var(--cyan); }
-.stat-lbl { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 4px; }
-.step-card { background: var(--bg2); border: 1px solid var(--border); padding: 28px; transition: border-color 0.2s, transform 0.2s; }
-.step-card:hover { border-color: var(--border2); transform: translateY(-3px); }
-.step-n { font-family: var(--mono); font-size: 48px; font-weight: 700; color: rgba(99,179,255,0.07); line-height: 1; margin-bottom: 12px; }
-.step-t { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
-.step-d { font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.8; }
+.stat-num { font-family: var(--mono); font-size: 28px; font-weight: 500; color: var(--accent); display: block; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-top: 3px; }
+
+/* STEPS */
+.step-card {
+  background: var(--bg2); border-radius: 16px;
+  border: 1px solid var(--border); padding: 28px;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+}
+.step-card:hover { box-shadow: var(--shadow2); transform: translateY(-4px); border-color: var(--border2); }
+.step-num { font-family: var(--mono); font-size: 52px; font-weight: 300; color: var(--border2); line-height: 1; margin-bottom: 16px; }
+.step-title { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 10px; }
+.step-desc { font-size: 14px; color: var(--ink2); line-height: 1.7; }
+
+/* FEATURE CHIPS */
+.chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  background: var(--bg3); color: var(--ink2);
+  font-family: var(--mono); font-size: 12px;
+  padding: 6px 14px; border-radius: 100px;
+  border: 1px solid var(--border); transition: all 0.15s;
+}
+.chip:hover { background: #e0e7ff; color: var(--accent); border-color: #a5b4fc; }
 </style>
 {% endblock %}
 {% block content %}
 
 <!-- HERO -->
-<section class="hero">
-  <div class="hero-grid"></div>
-  <div class="hero-glow"></div>
-  <div class="container" style="position:relative;z-index:1">
-    <div class="hero-content">
-      <div class="hero-eyebrow"><span class="dot"></span>ML-Powered Deploy Risk Intelligence</div>
-      <h1 class="hero-title">
-        Ship code.<br/>
-        Not <span class="accent">incidents.</span>
-        <span class="dim">Every deploy, scored.</span>
-      </h1>
-      <p class="hero-desc">
-        SafeShip scores every Jenkins deploy 0–100 before it runs.<br/>
-        Learns your team's patterns overnight. Blocks risky deploys automatically.<br/>
-        Free. Self-hosted. Gets smarter every day.
-      </p>
-      <div class="hero-actions">
-        <a href="/signup" class="btn-primary">Get API Key — Free</a>
-        <a href="/demo" class="btn-ghost">Try Live Demo →</a>
+<section style="position:relative; overflow:hidden;">
+  <div class="blob-container">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+  <div class="container">
+    <div class="hero">
+      <!-- Left -->
+      <div style="position:relative;z-index:1">
+        <div class="hero-eyebrow">
+          <span class="pulse"></span>
+          ML-Powered Deploy Intelligence
+        </div>
+        <h1 class="hero-title">
+          Ship code.<br/>
+          Not <span class="accent">incidents.</span>
+          <span class="line2">Every deploy, scored before it runs.</span>
+        </h1>
+        <p class="hero-desc">
+          SafeShip scores every Jenkins deploy 0–100 for risk using machine learning
+          that learns your team's patterns overnight. Friday 5pm + large diff + high failures
+          = blocked. Tuesday 10am + clean tests = ship it.
+        </p>
+        <div class="hero-actions">
+          <a href="/signup" class="btn-primary">Get API Key — Free</a>
+          <a href="/demo" class="btn-ghost">Try Live Demo →</a>
+        </div>
       </div>
-    </div>
 
-    <div class="hero-visual">
-      <div class="score-card">
-        <div class="score-card-top"></div>
-        <div class="score-card-header">
-          <span>payments-service #142</span>
-          <span class="live-pill"><span class="live-dot"></span>LIVE</span>
+      <!-- Right: Score card -->
+      <div class="score-card-wrap" style="position:relative;z-index:1">
+        <!-- Mini floating cards -->
+        <div class="mini-card mini-card-1">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:4px">MODEL PHASE</div>
+          <div style="font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent)">Base → Tenant</div>
         </div>
-        <div class="score-num">93</div>
-        <div class="score-verdict">⛔ Deploy Blocked</div>
-        <div class="reason-row">
-          <span class="reason-n">01</span>
-          <div><div class="reason-t">Recent failure rate</div><div class="reason-v">40% of last 10 builds failed</div></div>
+        <div class="mini-card mini-card-2">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:4px">PRECISION</div>
+          <div style="font-family:var(--mono);font-size:13px;font-weight:500;color:var(--green)">85.1%</div>
         </div>
-        <div class="reason-row">
-          <span class="reason-n">02</span>
-          <div><div class="reason-t">Diff size</div><div class="reason-v">847 lines changed (very large)</div></div>
-        </div>
-        <div class="reason-row">
-          <span class="reason-n">03</span>
-          <div><div class="reason-t">Time of deploy</div><div class="reason-v">Friday 5:00 PM (end of day)</div></div>
-        </div>
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--muted)">
-          Base model • Override: DEPLOY_FORCE=true
+
+        <div class="score-card">
+          <div class="card-topbar">
+            <span>payments-service #142</span>
+            <span class="live-badge"><span class="dot"></span>LIVE</span>
+          </div>
+          <div class="big-score">93</div>
+          <div class="verdict-tag">⛔ Deploy Blocked</div>
+          <div class="reason-item">
+            <span class="reason-idx">01</span>
+            <div><div class="reason-label">Recent failure rate</div><div class="reason-val">40% of last 10 builds failed</div></div>
+          </div>
+          <div class="reason-item">
+            <span class="reason-idx">02</span>
+            <div><div class="reason-label">Diff size</div><div class="reason-val">847 lines changed (very large)</div></div>
+          </div>
+          <div class="reason-item">
+            <span class="reason-idx">03</span>
+            <div><div class="reason-label">Time of deploy</div><div class="reason-val">Friday 5:00 PM (end of day)</div></div>
+          </div>
+          <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--muted)">
+            Base model active • Override: DEPLOY_FORCE=true
+          </div>
         </div>
       </div>
     </div>
@@ -136,13 +214,13 @@
 </section>
 
 <!-- STATS -->
-<div class="stats-row">
+<div class="stats-strip">
   <div class="container">
     <div class="stats-inner">
-      <div class="stat-item"><div class="stat-num">85.1%</div><div class="stat-lbl">Model Precision</div></div>
-      <div class="stat-item"><div class="stat-num">0.934</div><div class="stat-lbl">AUC-ROC Score</div></div>
-      <div class="stat-item"><div class="stat-num">&lt;200ms</div><div class="stat-lbl">Score Latency</div></div>
-      <div class="stat-item"><div class="stat-num">$0</div><div class="stat-lbl">Monthly Cost</div></div>
+      <div class="stat-item"><span class="stat-num">85.1%</span><div class="stat-lbl">Precision</div></div>
+      <div class="stat-item"><span class="stat-num">0.934</span><div class="stat-lbl">AUC-ROC</div></div>
+      <div class="stat-item"><span class="stat-num">&lt;200ms</span><div class="stat-lbl">Latency</div></div>
+      <div class="stat-item"><span class="stat-num">$0</span><div class="stat-lbl">Monthly cost</div></div>
     </div>
   </div>
 </div>
@@ -150,26 +228,28 @@
 <!-- HOW IT WORKS -->
 <section class="section">
   <div class="container">
-    <div class="section-tag">How it works</div>
-    <h2 class="section-title">Live in 5 minutes.<br/>Smarter every night.</h2>
-    <p style="font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:48px;line-height:1.8;max-width:480px">
-      One API key. One Jenkinsfile stage. SafeShip handles the rest.
-    </p>
+    <div style="text-align:center;margin-bottom:56px">
+      <div class="section-tag" style="margin:0 auto 16px">How it works</div>
+      <h2 class="section-title">Live in 5 minutes.<br/>Smarter every night.</h2>
+      <p style="font-size:17px;color:var(--ink2);max-width:480px;margin:0 auto;line-height:1.7">
+        One API key. One Jenkinsfile stage. SafeShip handles the rest.
+      </p>
+    </div>
     <div class="grid-3">
       <div class="step-card">
-        <div class="step-n">01</div>
-        <div class="step-t">Get your API key</div>
-        <p class="step-d">10 seconds. No credit card, no OAuth, no setup wizard. Email optional. Get your tenant_id and api_key instantly.</p>
+        <div class="step-num">01</div>
+        <div class="step-title">Get your API key</div>
+        <p class="step-desc">10 seconds. No credit card, no OAuth. Enter an email (optional), get your tenant_id and api_key instantly.</p>
       </div>
       <div class="step-card">
-        <div class="step-n">02</div>
-        <div class="step-t">Add one pipeline stage</div>
-        <p class="step-d">Copy the pre-filled Jenkinsfile stage from your dashboard. Paste it. Commit. Every deploy now gets scored before running.</p>
+        <div class="step-num">02</div>
+        <div class="step-title">Add one stage</div>
+        <p class="step-desc">Copy the pre-filled Jenkinsfile stage from your dashboard. Paste it. Every deploy now gets scored before running.</p>
       </div>
       <div class="step-card">
-        <div class="step-n">03</div>
-        <div class="step-t">Model learns your team</div>
-        <p class="step-d">Every deploy is logged. Every outcome recorded. Every night at 2am the model retrains on your data automatically.</p>
+        <div class="step-num">03</div>
+        <div class="step-title">Model learns you</div>
+        <p class="step-desc">Every deploy logged. Every outcome recorded. Nightly retrain at 2am. Model gets smarter automatically.</p>
       </div>
     </div>
   </div>
@@ -180,29 +260,62 @@
 <!-- ML LIFECYCLE -->
 <section class="section" style="padding-top:0">
   <div class="container">
-    <div class="section-tag">ML Lifecycle</div>
-    <h2 class="section-title" style="margin-bottom:36px">Gets smarter<br/>over time</h2>
-    <div class="phase-row"><div class="phase-label">Day 1</div><div class="phase-content"><span class="phase-tag">Base model</span>Universal risk patterns. Precision ~65%. Useful from minute one.</div></div>
-    <div class="phase-row"><div class="phase-label">~Day 10</div><div class="phase-content"><span class="phase-tag">80 labelled builds</span>Nightly retrain triggers. Your team's specific patterns emerge.</div></div>
-    <div class="phase-row"><div class="phase-label">Month 2</div><div class="phase-content"><span class="phase-tag">Personalised model</span>Knows your services, your deployers, your risk patterns. Precision ~80%+.</div></div>
-    <div class="phase-row" style="margin-bottom:0"><div class="phase-label">Month 6+</div><div class="phase-content"><span class="phase-tag">Drift detection</span>Weekly KS-test across 10 features. Auto-retrains if patterns shift.</div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center">
+      <div>
+        <div class="section-tag">ML Lifecycle</div>
+        <h2 class="section-title">Gets smarter<br/>over time</h2>
+        <p style="font-size:16px;color:var(--ink2);line-height:1.7;margin-bottom:32px">
+          SafeShip starts useful on day one and gets significantly better as
+          it learns your team's specific deploy patterns.
+        </p>
+        <a href="/about" class="btn-ghost" style="font-size:12px">See how the ML works →</a>
+      </div>
+      <div>
+        <div class="phase-row"><div class="phase-label">Day 1</div><div class="phase-content"><span class="phase-tag">Base model</span> Universal patterns active. Precision ~65%.</div></div>
+        <div class="phase-row"><div class="phase-label">~Day 10</div><div class="phase-content"><span class="phase-tag">80 labelled builds</span> Nightly retrain triggers for your team.</div></div>
+        <div class="phase-row"><div class="phase-label">Month 2</div><div class="phase-content"><span class="phase-tag">Personalised</span> Your patterns learned. Precision ~80%+.</div></div>
+        <div class="phase-row"><div class="phase-label">Month 6+</div><div class="phase-content"><span class="phase-tag">Drift detection</span> Weekly checks. Auto-adapts if patterns shift.</div></div>
+      </div>
+    </div>
   </div>
 </section>
 
 <div class="divider"></div>
 
+<!-- TECH -->
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:40px">
+      <div class="section-tag" style="margin:0 auto 16px">Tech Stack</div>
+      <h2 class="section-title" style="font-size:clamp(28px,3vw,40px)">Built on tools<br/>you already trust</h2>
+    </div>
+    <div class="chip-wrap" style="justify-content:center">
+      {% for t in ['Python 3.11','Random Forest','Flask','Docker','AWS EC2','AWS S3','DynamoDB','Ansible','scikit-learn','SMOTE','Gunicorn','Nginx'] %}
+      <div class="chip">{{ t }}</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
 <!-- CTA -->
 <section class="section" style="padding-top:0">
   <div class="container">
-    <div class="card" style="text-align:center;padding:64px;border-color:var(--border2)">
-      <div class="section-tag" style="justify-content:center">Ready?</div>
-      <h2 class="section-title">Your next deploy<br/>deserves a score</h2>
-      <p style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:36px;max-width:360px;margin-left:auto;margin-right:auto;line-height:1.9">
-        Free. Self-hosted. Your data stays in your infra.<br/>Add to Jenkins in under 5 minutes.
-      </p>
-      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-        <a href="/signup" class="btn-primary">Get API Key — Free</a>
-        <a href="/demo" class="btn-ghost">Try Demo First →</a>
+    <div style="background:var(--ink);border-radius:24px;padding:72px;text-align:center;position:relative;overflow:hidden">
+      <!-- Blob inside CTA -->
+      <div style="position:absolute;width:400px;height:400px;background:radial-gradient(circle,rgba(99,102,241,0.4),transparent);top:-100px;right:-80px;border-radius:50%;filter:blur(60px);pointer-events:none"></div>
+      <div style="position:absolute;width:300px;height:300px;background:radial-gradient(circle,rgba(124,58,237,0.3),transparent);bottom:-80px;left:-60px;border-radius:50%;filter:blur(60px);pointer-events:none"></div>
+      <div style="position:relative;z-index:1">
+        <div class="section-tag" style="background:rgba(255,255,255,0.1);color:#c7d2fe;margin:0 auto 16px">Ready to ship safer?</div>
+        <h2 style="font-size:clamp(36px,4vw,56px);font-weight:900;letter-spacing:-2px;color:#fff;margin-bottom:16px;line-height:1.05">
+          Your next deploy<br/>deserves a score
+        </h2>
+        <p style="font-size:16px;color:rgba(255,255,255,0.55);margin-bottom:40px;max-width:400px;margin-left:auto;margin-right:auto;line-height:1.7">
+          Free. Self-hosted. Your data stays in your infra.<br/>Add to Jenkins in under 5 minutes.
+        </p>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <a href="/signup" style="display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:13px;padding:13px 28px;border-radius:100px;background:#fff;color:var(--ink);text-decoration:none;font-weight:700;transition:all 0.2s" onmouseover="this.style.background='#e0e7ff';this.style.color='var(--accent)'" onmouseout="this.style.background='#fff';this.style.color='var(--ink)'">Get API Key — Free</a>
+          <a href="/demo" style="display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:13px;padding:12px 27px;border-radius:100px;background:transparent;color:rgba(255,255,255,0.7);border:1.5px solid rgba(255,255,255,0.2);text-decoration:none;transition:all 0.2s" onmouseover="this.style.color='#fff';this.style.borderColor='rgba(255,255,255,0.6)'" onmouseout="this.style.color='rgba(255,255,255,0.7)';this.style.borderColor='rgba(255,255,255,0.2)'">Try Demo First →</a>
+        </div>
       </div>
     </div>
   </div>

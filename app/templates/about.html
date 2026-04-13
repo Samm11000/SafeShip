@@ -1,140 +1,245 @@
 {% extends "base.html" %}
-{% block title %}About — Smart Deploy Gate{% endblock %}
+{% block title %}About SafeShip — ML-Powered Deploy Risk Intelligence{% endblock %}
+{% block head %}
+<style>
+.about-hero {
+  padding: 80px 0 60px;
+  position: relative; overflow: hidden;
+}
+.about-blob-1 {
+  position: absolute; width: 500px; height: 500px;
+  background: radial-gradient(circle, #ddd6fe, #c4b5fd);
+  top: -150px; right: -150px; border-radius: 50%;
+  filter: blur(80px); opacity: 0.4; animation: float 9s ease-in-out infinite;
+  pointer-events: none;
+}
+.about-blob-2 {
+  position: absolute; width: 350px; height: 350px;
+  background: radial-gradient(circle, #bfdbfe, #93c5fd);
+  bottom: -100px; left: -80px; border-radius: 50%;
+  filter: blur(70px); opacity: 0.35; animation: float2 11s ease-in-out infinite;
+  pointer-events: none;
+}
+.story-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 64px; }
+.big-stat { font-family: var(--mono); font-size: 64px; font-weight: 500; color: var(--accent); line-height: 1; margin-bottom: 8px; }
+.feature-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 64px; }
+.feature-card {
+  background: var(--bg2); border-radius: 16px;
+  border: 1px solid var(--border); padding: 24px;
+  box-shadow: var(--shadow); transition: transform 0.2s, box-shadow 0.2s;
+}
+.feature-card:hover { transform: translateY(-3px); box-shadow: var(--shadow2); }
+.feature-icon { font-size: 28px; margin-bottom: 14px; }
+.feature-title { font-size: 16px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 8px; }
+.feature-desc { font-size: 13px; color: var(--ink2); line-height: 1.7; font-family: var(--mono); }
+.team-card {
+  background: var(--bg2); border-radius: 20px;
+  border: 1px solid var(--border); padding: 32px;
+  box-shadow: var(--shadow); text-align: center;
+}
+.avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+</style>
+{% endblock %}
 {% block content %}
 
-<div class="container section">
-
-  <!-- Header -->
-  <div style="max-width:640px;margin-bottom:64px;animation:fadeInUp 0.5s ease forwards">
-    <div class="section-tag">About</div>
-    <h1 class="section-title">Built by a DevOps engineer<br/>who got paged at 3am</h1>
-    <p style="font-size:17px;color:rgba(232,244,248,0.6);line-height:1.8;margin-top:16px">
-      Smart Deploy Gate exists because "it worked on Friday afternoon" is not a deployment strategy.
-      We built ML that learns when your team ships safely — and when they don't.
-    </p>
-  </div>
-
-  <!-- Mission -->
-  <div class="grid-2" style="gap:32px;margin-bottom:64px">
-    <div class="card" style="border-color:var(--border2);padding:40px">
-      <div class="card-title">The Problem</div>
-      <p style="font-size:15px;color:rgba(232,244,248,0.65);line-height:1.8;margin-bottom:20px">
+<!-- HERO -->
+<section class="about-hero">
+  <div class="about-blob-1"></div>
+  <div class="about-blob-2"></div>
+  <div class="container" style="position:relative;z-index:1">
+    <div style="max-width:700px;animation:fadeInUp 0.5s ease both">
+      <div class="section-tag">About SafeShip</div>
+      <h1 class="section-title">Built because<br/>3am pages are <span style="color:var(--accent)">avoidable</span></h1>
+      <p style="font-size:18px;color:var(--ink2);line-height:1.75;max-width:580px;margin-top:16px">
         Every engineering team has the same story. A deploy goes out Friday at 5pm.
         The diff was "small." The tests passed. By Saturday morning, production is down.
-      </p>
-      <p style="font-size:15px;color:rgba(232,244,248,0.65);line-height:1.8">
-        The signals were all there — high recent failure rate, end-of-day timing, rushed commit.
-        But nobody was reading them. Now a machine does.
-      </p>
-    </div>
-    <div class="card" style="padding:40px">
-      <div class="card-title">The Solution</div>
-      <p style="font-size:15px;color:rgba(232,244,248,0.65);line-height:1.8;margin-bottom:20px">
-        A Random Forest model that scores every deploy before it runs.
-        Trained on your team's own build history. Gets smarter every night.
-        Integrates with Jenkins in one pipeline stage.
-      </p>
-      <p style="font-size:15px;color:rgba(232,244,248,0.65);line-height:1.8">
-        No SaaS subscription. No data leaving your infrastructure. No ML expertise required.
-        Just add the stage, get the score, ship with confidence.
+        The signals were all there — high failure rate, end-of-day timing, rushed commit.
+        <strong>Nobody was reading them. Now a machine does.</strong>
       </p>
     </div>
   </div>
+</section>
 
-  <div class="divider"></div>
+<div class="divider" style="margin:0"></div>
 
-  <!-- How the ML works -->
-  <div style="margin-bottom:64px">
-    <div class="section-tag">The ML Engine</div>
-    <h2 class="section-title" style="margin-bottom:40px">How the model works</h2>
-
-    <div class="grid-2" style="gap:16px">
-      <div>
-        <div class="phase-row" style="margin-bottom:0">
-          <div class="phase-label" style="font-size:10px">Algorithm</div>
-          <div class="phase-content">Random Forest Classifier — 100 trees, depth 8, balanced class weights</div>
-        </div>
-        <div class="phase-row" style="margin-bottom:0">
-          <div class="phase-label" style="font-size:10px">Precision</div>
-          <div class="phase-content" style="color:var(--green)">85.1% on base model — above industry average</div>
-        </div>
-        <div class="phase-row" style="margin-bottom:0">
-          <div class="phase-label" style="font-size:10px">AUC-ROC</div>
-          <div class="phase-content" style="color:var(--green)">0.934 — near-perfect risk separation</div>
-        </div>
-        <div class="phase-row" style="margin-bottom:0">
-          <div class="phase-label" style="font-size:10px">Imbalance fix</div>
-          <div class="phase-content">SMOTE oversampling — prevents "always safe" predictions</div>
-        </div>
-        <div class="phase-row" style="margin-bottom:0">
-          <div class="phase-label" style="font-size:10px">Retraining</div>
-          <div class="phase-content">Nightly cron at 2am UTC — 5-check validation gate before swap</div>
-        </div>
-        <div class="phase-row" style="margin-bottom:0">
-          <div class="phase-label" style="font-size:10px">Drift detection</div>
-          <div class="phase-content">Weekly KS-test on 10 features — alerts and forces retrain if detected</div>
-        </div>
-      </div>
-
-      <div class="card" style="padding:32px">
-        <div class="card-title">10 Features Scored</div>
-        {% for f in [
-          ('diff_size',           'Lines added + removed in commit'),
-          ('files_changed',       'Number of files touched'),
-          ('hour_of_day',         'Time of day when triggered'),
-          ('day_of_week',         'Monday=safe, Friday=risky'),
-          ('recent_failure_rate', 'Failures in last 10 builds'),
-          ('test_pass_rate',      'Test suite pass percentage'),
-          ('is_hotfix',           'Hotfix/fix/patch branch flag'),
-          ('deployer_exp',        'Past deploy count for this user'),
-          ('days_since_deploy',   'Days since last successful deploy'),
-          ('build_time_delta',    'Current vs average build duration'),
-        ] %}
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(0,200,255,0.06)">
-          <code style="font-size:11px;color:var(--cyan)">{{ f[0] }}</code>
-          <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">{{ f[1] }}</span>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-
-  <div class="divider"></div>
-
-  <!-- Architecture -->
-  <div style="margin-bottom:64px">
-    <div class="section-tag">Architecture</div>
-    <h2 class="section-title" style="margin-bottom:40px">What's running<br/>under the hood</h2>
-
-    <div class="grid-3">
-      {% for item in [
-        ('Scoring API', 'Flask + Gunicorn on EC2 t2.micro. Nginx reverse proxy. Model loaded in memory, refreshed every 5 min from S3.', 'cyan'),
-        ('Data Storage', 'S3 for model files and build CSVs. DynamoDB for tenant registry. All in ap-south-1.', 'amber'),
-        ('MLOps Loop', 'EC2 cron at 2am retrains all qualified tenants. 5-check validation gate. Atomic model swap via S3.', 'green'),
-      ] %}
-      <div class="card" style="padding:28px">
-        <div class="card-title" style="color:var(--{{ item[2] }})">{{ item[0] }}</div>
-        <p style="font-size:13px;color:rgba(232,244,248,0.6);line-height:1.8;font-family:var(--mono)">{{ item[1] }}</p>
+<!-- STATS ROW -->
+<div style="background:var(--bg2);padding:28px 0">
+  <div class="container">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0">
+      {% for item in [('85.1%','Model precision on base model'),('0.934','AUC-ROC score — near perfect'),('<200ms','Score latency per request'),('$0','Monthly infrastructure cost')] %}
+      <div style="padding:0 32px;border-right:1px solid var(--border);text-align:center{% if loop.last %};border-right:none{% endif %}">
+        <div style="font-family:var(--mono);font-size:32px;font-weight:500;color:var(--accent)">{{ item[0] }}</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:0.5px;margin-top:4px">{{ item[1] }}</div>
       </div>
       {% endfor %}
     </div>
   </div>
+</div>
 
-  <div class="divider"></div>
+<div class="divider" style="margin:0"></div>
 
-  <!-- CTA -->
-  <div class="card" style="text-align:center;padding:48px;border-color:var(--border2)">
-    <div class="section-tag" style="justify-content:center">Open source</div>
-    <h2 style="font-size:32px;font-weight:800;margin-bottom:16px">Self-host it.<br/>Own your data.</h2>
-    <p style="font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:32px;line-height:1.8">
-      All code is open source. Deploy to your own AWS account.<br/>
-      No build data ever leaves your infrastructure.
-    </p>
-    <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
-      <a href="/" class="btn-primary">Get Started Free</a>
-      <a href="/demo" class="btn-ghost">Try Live Demo →</a>
+<!-- STORY -->
+<section class="section">
+  <div class="container">
+    <div class="story-grid">
+      <div>
+        <div class="section-tag">The Problem</div>
+        <h2 style="font-size:32px;font-weight:900;letter-spacing:-1px;margin-bottom:20px;line-height:1.1">Deploy risk is<br/>invisible until it isn't</h2>
+        <p style="font-size:15px;color:var(--ink2);line-height:1.8;margin-bottom:16px">
+          Engineering teams make deploy decisions based on gut feeling. "It's a small change." "Tests passed." "We need this out today." But every one of those decisions contains measurable signals that predict failure.
+        </p>
+        <p style="font-size:15px;color:var(--ink2);line-height:1.8">
+          Friday afternoon. 800+ line diff. 3 of the last 10 builds failed. The ML model would have scored that deploy 94/100. But without SafeShip, nobody was looking.
+        </p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card" style="padding:28px">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:10px">BEFORE SAFESHIP</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            {% for item in ['Deploy goes out Friday 5pm','Tests passed, feels safe','Production down Saturday 3am','4 hours of incident response','Root cause: Friday + large diff + failures'] %}
+            <div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--ink2)">
+              <span style="color:var(--red);font-weight:700">✗</span> {{ item }}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="card" style="padding:28px;border-color:#a5b4fc">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:10px">WITH SAFESHIP</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            {% for item in ['Deploy scores 94/100 BLOCKED','Top reasons shown instantly','Team delays to Monday 10am','Deploy scores 18/100 SAFE','Ships cleanly, no incident'] %}
+            <div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--ink2)">
+              <span style="color:var(--green);font-weight:700">✓</span> {{ item }}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
     </div>
   </div>
+</section>
 
-</div>
+<div class="divider"></div>
+
+<!-- HOW ML WORKS -->
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:48px">
+      <div class="section-tag" style="margin:0 auto 16px">The ML Engine</div>
+      <h2 class="section-title" style="font-size:clamp(28px,3.5vw,44px)">How the model works</h2>
+    </div>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🌲</div>
+        <div class="feature-title">Random Forest</div>
+        <p class="feature-desc">100 decision trees, depth 8, balanced class weights. Works well on 80–5000 samples — exactly the range real teams produce.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚖️</div>
+        <div class="feature-title">SMOTE Balancing</div>
+        <p class="feature-desc">Most builds succeed. Without SMOTE, the model would just predict "safe" for everything. SMOTE forces it to learn risky patterns.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <div class="feature-title">10 Features</div>
+        <p class="feature-desc">Diff size, failure rate, time of day, day of week, test pass rate, hotfix flag, deployer experience, days since deploy, and more.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔄</div>
+        <div class="feature-title">Nightly Retraining</div>
+        <p class="feature-desc">EC2 cron at 2am UTC. Trains per-tenant models when 80+ labelled builds exist. 5-check validation gate before any model swap.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <div class="feature-title">Drift Detection</div>
+        <p class="feature-desc">Weekly KS-test across all 10 features. If your team's deploy patterns shift significantly, the model automatically retrains.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <div class="feature-title">Validation Gate</div>
+        <p class="feature-desc">5 checks before any model swap: dataset size, precision ≥0.75, AUC ≥0.70, no regression vs old model, min risky ratio.</p>
+      </div>
+    </div>
+
+    <!-- 10 features table -->
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:20px 24px 0;font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase">All 10 Scored Features</div>
+      <table style="margin-top:12px">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Signal Weight</th>
+            <th>Extraction</th>
+            <th>Fallback</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in [
+            ('diff_size','High','git diff --stat | parse lines','files × 20'),
+            ('recent_failure_rate','Very High','Jenkins API last 10 builds','0.0'),
+            ('test_pass_rate','High','Jenkins test report API','1.0'),
+            ('is_hotfix','High','Branch name contains hotfix/fix','0'),
+            ('hour_of_day','Medium','System time at trigger','Never missing'),
+            ('day_of_week','Medium','System time at trigger','Never missing'),
+            ('diff_size','Medium','git diff --name-only | wc -l','5'),
+            ('days_since_deploy','Medium','Jenkins last success timestamp','7.0'),
+            ('deployer_exp','Low','Count in tenant S3 CSV','1'),
+            ('build_time_delta','Low','Current vs 14-day avg duration','0.0'),
+          ] %}
+          <tr>
+            <td><code>{{ row[0] }}</code></td>
+            <td><span class="badge {% if row[1] == 'Very High' %}badge-red{% elif row[1] == 'High' %}badge-amber{% else %}badge-muted{% endif %}">{{ row[1] }}</span></td>
+            <td style="color:var(--muted)">{{ row[2] }}</td>
+            <td style="color:var(--muted)">{{ row[3] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ARCHITECTURE -->
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:40px">
+      <div class="section-tag" style="margin:0 auto 16px">Architecture</div>
+      <h2 class="section-title" style="font-size:clamp(28px,3.5vw,44px)">Everything on<br/>AWS Free Tier</h2>
+    </div>
+    <div class="grid-3">
+      {% for item in [
+        ('EC2 t2.micro','Scoring API','Flask + Gunicorn behind Nginx. Model loaded in memory, hot-reloaded every 5 min from S3. Ansible-provisioned.','#e0e7ff','var(--accent)'),
+        ('S3 (2 buckets)','Storage','Model files (.pkl) and per-tenant build CSVs. 90-day rolling window. Monthly archive. Free tier: 5 GB.','#dcfce7','var(--green)'),
+        ('DynamoDB','Tenant Registry','Single table, partition key: tenant_id. All tenant metadata, thresholds, model phase. Free tier: 25 GB.','#fef3c7','var(--amber)'),
+      ] %}
+      <div class="card" style="padding:28px">
+        <div style="display:inline-block;background:{{ item[3] }};color:{{ item[4] }};font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:100px;margin-bottom:14px;font-weight:500">{{ item[0] }}</div>
+        <div style="font-size:18px;font-weight:800;margin-bottom:10px">{{ item[1] }}</div>
+        <p style="font-family:var(--mono);font-size:12px;color:var(--ink2);line-height:1.8">{{ item[2] }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div style="background:var(--ink);border-radius:24px;padding:64px;text-align:center;position:relative;overflow:hidden">
+      <div style="position:absolute;width:400px;height:400px;background:radial-gradient(circle,rgba(99,102,241,0.4),transparent);top:-120px;right:-80px;border-radius:50%;filter:blur(60px);pointer-events:none"></div>
+      <div style="position:relative;z-index:1">
+        <h2 style="font-size:clamp(32px,4vw,48px);font-weight:900;letter-spacing:-2px;color:#fff;margin-bottom:16px">Start shipping safer today</h2>
+        <p style="font-size:15px;color:rgba(255,255,255,0.5);margin-bottom:36px;max-width:360px;margin-left:auto;margin-right:auto;line-height:1.7;font-family:var(--mono)">
+          Free. Self-hosted. Your data stays in your infra.
+        </p>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <a href="/signup" style="display:inline-flex;font-family:var(--mono);font-size:13px;padding:13px 28px;border-radius:100px;background:#fff;color:var(--ink);text-decoration:none;font-weight:700;transition:all 0.2s" onmouseover="this.style.background='#e0e7ff';this.style.color='var(--accent)'" onmouseout="this.style.background='#fff';this.style.color='var(--ink)'">Get Started Free</a>
+          <a href="/demo" style="display:inline-flex;font-family:var(--mono);font-size:13px;padding:12px 27px;border-radius:100px;background:transparent;color:rgba(255,255,255,0.65);border:1.5px solid rgba(255,255,255,0.2);text-decoration:none" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,0.65)'">Try Live Demo →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 {% endblock %}

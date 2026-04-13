@@ -1,315 +1,164 @@
-{% extends "base.html" %}
-{% block title %}Dashboard — Smart Deploy Gate{% endblock %}
+"""
+dashboard.py
+Path: C:\deploy-gate\app\routes\dashboard.py
+"""
 
-{% block head %}
-<style>
-  .dash-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: 40px 0 32px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 32px;
-    flex-wrap: wrap;
-    gap: 16px;
-  }
-  .dash-title {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--muted);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    margin-bottom: 6px;
-  }
-  .dash-tenant {
-    font-family: var(--mono);
-    font-size: 13px;
-    color: var(--cyan);
-  }
-  .phase-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    padding: 8px 16px;
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 1px;
-  }
-  .phase-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    animation: pulse-dot 2s ease-in-out infinite;
-  }
-</style>
-{% endblock %}
+import os, sys, csv, io, json, boto3
+from flask import Blueprint, render_template, request, jsonify, redirect
 
-{% block content %}
-<div class="container">
+_app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ml_dir  = os.path.join(os.path.dirname(_app_dir), "ml")
+sys.path.insert(0, _app_dir)
+sys.path.insert(0, _ml_dir)
 
-  <!-- HEADER -->
-  <div class="dash-header">
-    <div>
-      <div class="dash-title">Mission Control</div>
-      <div style="font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px">Deploy Gate Dashboard</div>
-      <div class="dash-tenant">Tenant: {{ tenant_id }}</div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      {% if model_phase == 'tenant' %}
-      <div class="phase-pill">
-        <span class="phase-dot" style="background:var(--green)"></span>
-        Personalised Model
-      </div>
-      {% else %}
-      <div class="phase-pill">
-        <span class="phase-dot" style="background:var(--amber)"></span>
-        Base Model
-      </div>
-      {% endif %}
-      <div class="phase-pill" style="color:var(--cyan)">Precision: {{ precision }}%</div>
-    </div>
-  </div>
+from dynamo_client import (validate_tenant, update_slack_webhook,
+                            update_thresholds, get_tenant)
+from scorer        import score_build
+from validator     import BuildFeatures
 
-  <!-- METRICS -->
-  <div class="grid-4" style="margin-bottom:24px">
-    <div class="metric">
-      <div class="metric-label">Total Builds</div>
-      <div class="metric-value">{{ build_count }}</div>
-    </div>
-    <div class="metric">
-      <div class="metric-label">Labelled Builds</div>
-      <div class="metric-value">{{ labelled_count }}</div>
-    </div>
-    <div class="metric">
-      <div class="metric-label">Model Precision</div>
-      <div class="metric-value">{{ precision }}%</div>
-    </div>
-    <div class="metric">
-      <div class="metric-label">Model Phase</div>
-      <div class="metric-value" style="font-size:16px;padding-top:6px">
-        {% if model_phase == 'tenant' %}
-          <span style="color:var(--green)">Personalised</span>
-        {% else %}
-          <span style="color:var(--amber)">Base</span>
-        {% endif %}
-      </div>
-    </div>
-  </div>
+S3_DATA_BUCKET = os.getenv("S3_DATA_BUCKET", "deploy-gate-data")
+AWS_REGION     = os.getenv("AWS_REGION",     "ap-south-1")
 
-  <!-- PROGRESS TO PERSONAL MODEL -->
-  {% if model_phase == 'base' %}
-  <div class="card" style="margin-bottom:24px">
-    <div class="card-title">Progress to Personalised Model</div>
-    <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px">
-      <span>{{ labelled_count }} labelled builds</span>
-      <span>Target: 80</span>
-    </div>
-    <div class="progress-wrap">
-      <div class="progress-fill" style="width:{{ progress_pct }}%"></div>
-    </div>
-    <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px">
-      {% if labelled_count >= 80 %}
-        Model retrain scheduled for tonight 2am UTC.
-      {% else %}
-        {{ 80 - labelled_count }} more labelled builds needed. Retrains nightly at 2am UTC.
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
+dashboard_bp = Blueprint("dashboard", __name__)
 
-  <!-- CHARTS -->
-  <div class="grid-2" style="margin-bottom:24px">
-    <div class="card">
-      <div class="card-title">Risk Score History — Last 30 Builds</div>
-      {% if build_count == 0 %}
-      <div style="text-align:center;padding:48px;font-family:var(--mono);font-size:12px;color:var(--muted)">
-        No builds yet. Add the Jenkinsfile stage below.
-      </div>
-      {% else %}
-      <canvas id="scoreChart" height="200"></canvas>
-      {% endif %}
-    </div>
-    <div class="card">
-      <div class="card-title">Feature Importance — What Drives Your Scores</div>
-      {% if feat_names != '[]' %}
-      <canvas id="featChart" height="200"></canvas>
-      {% else %}
-      <div style="text-align:center;padding:48px;font-family:var(--mono);font-size:12px;color:var(--muted)">Loading...</div>
-      {% endif %}
-    </div>
-  </div>
 
-  <!-- RECENT BUILDS TABLE -->
-  <div class="card" style="margin-bottom:24px">
-    <div class="card-title">Recent Builds</div>
-    {% if recent_builds %}
-    <table>
-      <thead>
-        <tr>
-          <th>Build ID</th>
-          <th>Score</th>
-          <th>Verdict</th>
-          <th>Label</th>
-          <th>Diff</th>
-          <th>Failure Rate</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for b in recent_builds %}
-        <tr>
-          <td><code style="font-size:10px;color:var(--muted)">{{ b.build_id[:16] if b.build_id else '-' }}...</code></td>
-          <td>
-            {% set s = b.predicted_score|int %}
-            <span style="font-family:var(--mono);font-weight:700;color:{% if s <= 40 %}var(--green){% elif s <= 70 %}var(--amber){% else %}var(--red){% endif %}">
-              {{ s }}/100
-            </span>
-          </td>
-          <td>
-            {% set s = b.predicted_score|int %}
-            <span class="badge {% if s <= 40 %}badge-green{% elif s <= 70 %}badge-amber{% else %}badge-red{% endif %}">
-              {% if s <= 40 %}SAFE{% elif s <= 70 %}WARN{% else %}BLOCKED{% endif %}
-            </span>
-          </td>
-          <td>
-            {% if b.label == '1' %}<span class="badge badge-red">Risky</span>
-            {% elif b.label == '0' %}<span class="badge badge-green">Safe</span>
-            {% else %}<span class="badge badge-muted">Pending</span>{% endif %}
-          </td>
-          <td style="color:var(--muted)">{{ b.diff_size }} lines</td>
-          <td style="color:var(--muted)">{{ (b.recent_failure_rate|float * 100)|int }}%</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div style="text-align:center;padding:32px;font-family:var(--mono);font-size:12px;color:var(--muted)">No builds recorded yet.</div>
-    {% endif %}
-  </div>
+def _load_tenant_builds(tenant_id, limit=30):
+    try:
+        s3  = boto3.client("s3", region_name=AWS_REGION)
+        key = f"tenant_{tenant_id}/data.csv"
+        obj = s3.get_object(Bucket=S3_DATA_BUCKET, Key=key)
+        content = obj["Body"].read().decode("utf-8")
+        reader  = csv.DictReader(io.StringIO(content))
+        rows    = list(reader)
+        return rows[-limit:] if len(rows) > limit else rows
+    except Exception:
+        return []
 
-  <!-- SETTINGS + JENKINSFILE -->
-  <div class="grid-2" style="margin-bottom:24px">
-    <div class="card">
-      <div class="card-title">Settings</div>
-      <div style="margin-bottom:16px">
-        <label style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;display:block;margin-bottom:8px">SLACK WEBHOOK URL</label>
-        <input type="text" id="slack-webhook" value="{{ slack_webhook }}" placeholder="https://hooks.slack.com/services/..."/>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px">Slack → Apps → Incoming Webhooks → Add New</div>
-      </div>
-      <div style="margin-bottom:16px">
-        <label style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;display:block;margin-bottom:8px">
-          YELLOW THRESHOLD: <span id="yellow-val" style="color:var(--amber)">{{ thresh_yellow }}</span>
-        </label>
-        <input type="range" id="thresh-yellow" min="20" max="60" value="{{ thresh_yellow }}"
-               oninput="document.getElementById('yellow-val').textContent=this.value" style="width:100%"/>
-      </div>
-      <div style="margin-bottom:20px">
-        <label style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;display:block;margin-bottom:8px">
-          RED THRESHOLD: <span id="red-val" style="color:var(--red)">{{ thresh_red }}</span>
-        </label>
-        <input type="range" id="thresh-red" min="50" max="90" value="{{ thresh_red }}"
-               oninput="document.getElementById('red-val').textContent=this.value" style="width:100%"/>
-      </div>
-      <button class="btn-primary" style="padding:12px 28px" onclick="saveSettings()">Save Settings</button>
-      <span id="save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-left:12px;display:none">✓ Saved</span>
-    </div>
 
-    <div class="card">
-      <div class="card-title">Your Jenkinsfile Stage</div>
-      <pre id="jf-snippet" style="font-size:11px;max-height:220px;overflow-y:auto;margin-bottom:12px">{{ jenkinsfile }}</pre>
-      <button class="btn-ghost" style="padding:10px 20px;font-size:11px" onclick="copySnippet()">Copy to Clipboard</button>
-      <span id="copy-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-left:12px;display:none">✓ Copied</span>
-    </div>
-  </div>
+# ── ROUTES ────────────────────────────────────────────────────────
 
-</div>
+@dashboard_bp.route("/", methods=["GET"])
+def index():
+    return render_template("index.html")
 
-<script>
-const TENANT_ID = "{{ tenant_id }}";
-const API_KEY   = "{{ api_key }}";
 
-{% if build_count > 0 %}
-const scores  = {{ scores }};
-const bNums   = {{ build_nums }};
-const bColors = {{ colors }};
-new Chart(document.getElementById('scoreChart'), {
-  type: 'bar',
-  data: {
-    labels: bNums,
-    datasets: [{
-      data: scores,
-      backgroundColor: bColors,
-      borderRadius: 0,
-    }]
-  },
-  options: {
-    responsive: true,
-    plugins: { legend: { display: false } },
-    scales: {
-      y: {
-        min: 0, max: 100,
-        grid: { color: 'rgba(0,200,255,0.06)' },
-        ticks: { color: '#5a7a8a', font: { family: 'Space Mono', size: 10 } }
-      },
-      x: {
-        grid: { display: false },
-        ticks: { color: '#5a7a8a', font: { family: 'Space Mono', size: 10 } }
-      }
-    }
-  }
-});
-{% endif %}
+@dashboard_bp.route("/signup", methods=["GET"])
+def signup_page():
+    error = request.args.get("error", "")
+    return render_template("signup.html", error=error)
 
-const featNames  = {{ feat_names }};
-const featValues = {{ feat_values }};
-if (featNames.length > 0) {
-  new Chart(document.getElementById('featChart'), {
-    type: 'bar',
-    data: {
-      labels: featNames,
-      datasets: [{
-        data: featValues,
-        backgroundColor: 'rgba(0,200,255,0.3)',
-        borderColor: 'rgba(0,200,255,0.8)',
-        borderWidth: 1,
-        borderRadius: 0,
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: 'rgba(0,200,255,0.06)' }, ticks: { color: '#5a7a8a', font: { family: 'Space Mono', size: 10 } } },
-        y: { grid: { display: false }, ticks: { color: '#5a7a8a', font: { family: 'Space Mono', size: 10 } } }
-      }
-    }
-  });
-}
 
-async function saveSettings() {
-  const r = await fetch('/settings', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      tenant_id: TENANT_ID, api_key: API_KEY,
-      slack_webhook: document.getElementById('slack-webhook').value,
-      threshold_yellow: parseInt(document.getElementById('thresh-yellow').value),
-      threshold_red: parseInt(document.getElementById('thresh-red').value),
-    })
-  });
-  if (r.ok) {
-    const m = document.getElementById('save-msg');
-    m.style.display = 'inline';
-    setTimeout(() => m.style.display='none', 2000);
-  }
-}
+@dashboard_bp.route("/about", methods=["GET"])
+def about():
+    return render_template("about.html")
 
-function copySnippet() {
-  navigator.clipboard.writeText(document.getElementById('jf-snippet').textContent).then(() => {
-    const m = document.getElementById('copy-msg');
-    m.style.display = 'inline';
-    setTimeout(() => m.style.display='none', 2000);
-  });
-}
-</script>
-{% endblock %}
+
+@dashboard_bp.route("/demo", methods=["GET"])
+def demo():
+    return render_template("demo.html")
+
+
+@dashboard_bp.route("/demo/score", methods=["POST"])
+def demo_score():
+    data = request.get_json(silent=True) or {}
+    data["tenant_id"] = "demo"
+    data["api_key"]   = "demo"
+    try:
+        features = BuildFeatures(**data)
+        result   = score_build(features.to_model_input(), "demo")
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@dashboard_bp.route("/dashboard", methods=["GET"])
+def dashboard():
+    tenant_id = request.args.get("tenant_id", "")
+    api_key   = request.args.get("api_key",   "")
+
+    if not tenant_id or not api_key:
+        return redirect("/signup")
+
+    tenant = validate_tenant(tenant_id, api_key)
+    if not tenant:
+        return redirect("/signup?error=Invalid+credentials")
+
+    builds = _load_tenant_builds(tenant_id, limit=30)
+
+    scores    = [int(b.get("predicted_score", 0)) for b in builds]
+    build_nums= list(range(1, len(scores) + 1))
+    colors    = []
+    for s in scores:
+        if   s <= 40: colors.append("#22c55e")
+        elif s <= 70: colors.append("#f59e0b")
+        else:         colors.append("#ef4444")
+
+    build_count    = int(tenant.get("build_count",    0))
+    labelled_count = int(tenant.get("labelled_count", 0))
+    model_phase    = tenant.get("model_phase",   "base")
+    precision      = float(tenant.get("model_precision", 0.851))
+    progress_pct   = min(100, int(labelled_count / 80 * 100))
+
+    try:
+        from scorer import _cache, FEATURE_COLUMNS
+        model, _ = _cache.get_model(tenant_id)
+        feat_imp = sorted(
+            zip(FEATURE_COLUMNS, model.feature_importances_),
+            key=lambda x: x[1], reverse=True
+        )[:5]
+        feat_names  = [f[0].replace("_", " ").title() for f in feat_imp]
+        feat_values = [round(f[1] * 100, 1) for f in feat_imp]
+    except Exception:
+        feat_names  = []
+        feat_values = []
+
+    jenkinsfile = f"""stage('SafeShip Risk Check') {{
+    steps {{
+        script {{
+            def res = sh(script: \"\"\"curl -s -X POST http://YOUR-EC2-IP/score \\\\
+              -H 'Content-Type: application/json' \\\\
+              -d '{{"tenant_id":"{tenant_id}","api_key":"{api_key}","hour_of_day":${{new Date().hours}},"day_of_week":${{new Date().day}},"diff_size":${{env.GIT_DIFF_SIZE ?: 100}},"recent_failure_rate":0.0}}'\"\"\", returnStdout:true).trim()
+            def result = readJSON text: res
+            if (result.verdict == 'BLOCKED') error("SafeShip blocked: ${{result.score}}/100")
+            echo "SafeShip: ${{result.score}}/100 - ${{result.verdict}}"
+        }}
+    }}
+}}"""
+
+    return render_template("dashboard.html",
+        tenant         = tenant,
+        tenant_id      = tenant_id,
+        api_key        = api_key,
+        scores         = json.dumps(scores),
+        build_nums     = json.dumps(build_nums),
+        colors         = json.dumps(colors),
+        build_count    = build_count,
+        labelled_count = labelled_count,
+        model_phase    = model_phase,
+        precision      = round(precision * 100, 1),
+        progress_pct   = progress_pct,
+        recent_builds  = list(reversed(builds))[:10],
+        feat_names     = json.dumps(feat_names),
+        feat_values    = json.dumps(feat_values),
+        jenkinsfile    = jenkinsfile,
+        slack_webhook  = tenant.get("slack_webhook", ""),
+        thresh_yellow  = int(tenant.get("threshold_yellow", 40)),
+        thresh_red     = int(tenant.get("threshold_red",    70)),
+    )
+
+
+@dashboard_bp.route("/settings", methods=["POST"])
+def save_settings():
+    data      = request.get_json(silent=True) or {}
+    tenant_id = data.get("tenant_id", "")
+    api_key   = data.get("api_key",   "")
+    tenant    = validate_tenant(tenant_id, api_key)
+    if not tenant:
+        return jsonify({"error": "Invalid credentials"}), 401
+    webhook = data.get("slack_webhook", "").strip()
+    yellow  = int(data.get("threshold_yellow", 40))
+    red     = int(data.get("threshold_red",    70))
+    if webhook:
+        update_slack_webhook(tenant_id, webhook)
+    update_thresholds(tenant_id, yellow, red)
+    return jsonify({"status": "saved"}), 200
