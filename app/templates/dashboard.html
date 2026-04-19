@@ -132,7 +132,7 @@
     </div>
     <div class="card">
       <div class="card-title">Feature Importance — What Drives Your Scores</div>
-      {% if feat_names != '[]' %}
+      {% if feat_names and feat_names|length > 0 %}
       <canvas id="featChart" height="200"></canvas>
       {% else %}
       <div style="text-align:center;padding:48px;font-family:var(--mono);font-size:12px;color:var(--muted)">Loading...</div>
@@ -187,129 +187,127 @@
     {% endif %}
   </div>
 
-  <!-- SETTINGS + JENKINSFILE -->
-  <div class="grid-2" style="margin-bottom:24px">
-    <div class="card">
-      <div class="card-title">Settings</div>
-      <div style="margin-bottom:16px">
-        <label style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;display:block;margin-bottom:8px">SLACK WEBHOOK URL</label>
-        <input type="text" id="slack-webhook" value="{{ slack_webhook }}" placeholder="https://hooks.slack.com/services/..."/>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px">Slack → Apps → Incoming Webhooks → Add New</div>
-      </div>
-      <div style="margin-bottom:16px">
-        <label style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;display:block;margin-bottom:8px">
-          YELLOW THRESHOLD: <span id="yellow-val" style="color:var(--amber)">{{ thresh_yellow }}</span>
-        </label>
-        <input type="range" id="thresh-yellow" min="20" max="60" value="{{ thresh_yellow }}"
-               oninput="document.getElementById('yellow-val').textContent=this.value" style="width:100%"/>
-      </div>
-      <div style="margin-bottom:20px">
-        <label style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;display:block;margin-bottom:8px">
-          RED THRESHOLD: <span id="red-val" style="color:var(--red)">{{ thresh_red }}</span>
-        </label>
-        <input type="range" id="thresh-red" min="50" max="90" value="{{ thresh_red }}"
-               oninput="document.getElementById('red-val').textContent=this.value" style="width:100%"/>
-      </div>
-      <button class="btn-primary" style="padding:12px 28px" onclick="saveSettings()">Save Settings</button>
-      <span id="save-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-left:12px;display:none">✓ Saved</span>
-    </div>
+<div class="grid-2" style="margin-bottom:24px">
 
-    <div class="card">
-      <div class="card-title">Your Jenkinsfile Stage</div>
-      <pre id="jf-snippet" style="font-size:11px;max-height:220px;overflow-y:auto;margin-bottom:12px">{{ jenkinsfile }}</pre>
-      <button class="btn-ghost" style="padding:10px 20px;font-size:11px" onclick="copySnippet()">Copy to Clipboard</button>
-      <span id="copy-msg" style="font-family:var(--mono);font-size:11px;color:var(--green);margin-left:12px;display:none">✓ Copied</span>
-    </div>
+  <div class="card">
+    <div class="card-title">Settings</div>
+
+    <input type="text" id="slack-webhook"
+      value="{{ slack_webhook }}"
+      placeholder="Slack webhook URL"
+      style="margin-bottom:14px">
+
+    <label>Yellow Threshold: <span id="yellow-val">{{ thresh_yellow }}</span></label>
+    <input type="range" id="thresh-yellow" min="20" max="60"
+      value="{{ thresh_yellow }}"
+      oninput="yellow-val.textContent=this.value">
+
+    <label>Red Threshold: <span id="red-val">{{ thresh_red }}</span></label>
+    <input type="range" id="thresh-red" min="50" max="90"
+      value="{{ thresh_red }}"
+      oninput="red-val.textContent=this.value">
+
+    <button class="btn-primary" onclick="saveSettings()">Save</button>
+    <span id="save-msg" style="display:none">✓ Saved</span>
   </div>
 
+  <div>
+
+    <div class="card">
+      <div class="card-title">Step 1 — Environment</div>
+      <pre id="env-snippet">{{ env_block }}</pre>
+      <button class="btn-ghost" onclick="copyText('env-snippet')">Copy</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Step 2 — Risk Stage</div>
+      <pre id="risk-snippet">{{ risk_stage }}</pre>
+      <button class="btn-ghost" onclick="copyText('risk-snippet')">Copy</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Step 3 — Post Block</div>
+      <pre id="post-snippet">{{ post_block }}</pre>
+      <button class="btn-ghost" onclick="copyText('post-snippet')">Copy</button>
+    </div>
+
+  </div>
 </div>
+  <script>
+  const TENANT_ID = "{{ tenant_id }}";
+  const API_KEY   = "{{ api_key }}";
 
-<script>
-const TENANT_ID = "{{ tenant_id }}";
-const API_KEY   = "{{ api_key }}";
+  document.addEventListener("DOMContentLoaded", () => {
 
-{% if build_count > 0 %}
-const scores  = {{ scores }};
-const bNums   = {{ build_nums }};
-const bColors = {{ colors }};
-new Chart(document.getElementById('scoreChart'), {
-  type: 'bar',
-  data: {
-    labels: bNums,
-    datasets: [{
-      data: scores,
-      backgroundColor: bColors,
-      borderRadius: 0,
-    }]
-  },
-  options: {
-    responsive: true,
-    plugins: { legend: { display: false } },
-    scales: {
-      y: {
-        min: 0, max: 100,
-        grid: { color: 'rgba(0,200,255,0.06)' },
-        ticks: { color: '#5a7a8a', font: { family: 'Space Mono', size: 10 } }
-      },
-      x: {
-        grid: { display: false },
-        ticks: { color: '#5a7a8a', font: { family: 'Space Mono', size: 10 } }
-      }
+    const scores = {{ scores|safe }};
+    const nums = {{ build_nums|safe }};
+    const featNames = {{ feat_names|safe }};
+    const featValues = {{ feat_values|safe }};
+
+    if (document.getElementById("scoreChart") && scores.length) {
+      new Chart(scoreChart, {
+        type: "line",
+        data: {
+          labels: nums,
+          datasets: [{
+            data: scores,
+            tension: .35,
+            fill: true,
+            borderWidth: 2
+          }]
+        },
+        options: {
+          plugins:{legend:{display:false}},
+          scales:{y:{min:0,max:100}}
+        }
+      });
     }
-  }
-});
-{% endif %}
 
-const featNames  = {{ feat_names }};
-const featValues = {{ feat_values }};
-if (featNames.length > 0) {
-  new Chart(document.getElementById('featChart'), {
-    type: 'bar',
-    data: {
-      labels: featNames,
-      datasets: [{
-        data: featValues,
-        backgroundColor: 'rgba(0,200,255,0.3)',
-        borderColor: 'rgba(0,200,255,0.8)',
-        borderWidth: 1,
-        borderRadius: 0,
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: 'rgba(0,200,255,0.06)' }, ticks: { color: '#5a7a8a', font: { family: 'Space Mono', size: 10 } } },
-        y: { grid: { display: false }, ticks: { color: '#5a7a8a', font: { family: 'Space Mono', size: 10 } } }
-      }
+    if (document.getElementById("featChart") && featNames.length) {
+      new Chart(featChart, {
+        type: "bar",
+        data: {
+          labels: featNames,
+          datasets: [{
+            data: featValues,
+            borderWidth:1
+          }]
+        },
+        options:{
+          indexAxis:'y',
+          plugins:{legend:{display:false}}
+        }
+      });
     }
+
   });
-}
 
-async function saveSettings() {
-  const r = await fetch('/settings', {
-    method:'POST', headers:{'Content-Type':'application/json'},
+  function copyText(id){
+  navigator.clipboard.writeText(
+    document.getElementById(id).textContent
+  );
+  }
+
+  async function saveSettings(){
+  const r = await fetch('/settings',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      tenant_id: TENANT_ID, api_key: API_KEY,
-      slack_webhook: document.getElementById('slack-webhook').value,
-      threshold_yellow: parseInt(document.getElementById('thresh-yellow').value),
-      threshold_red: parseInt(document.getElementById('thresh-red').value),
+      tenant_id:TENANT_ID,
+      api_key:API_KEY,
+      slack_webhook:document.getElementById('slack-webhook').value,
+      threshold_yellow:parseInt(document.getElementById('thresh-yellow').value),
+      threshold_red:parseInt(document.getElementById('thresh-red').value)
     })
   });
-  if (r.ok) {
-    const m = document.getElementById('save-msg');
-    m.style.display = 'inline';
-    setTimeout(() => m.style.display='none', 2000);
-  }
-}
 
-function copySnippet() {
-  navigator.clipboard.writeText(document.getElementById('jf-snippet').textContent).then(() => {
-    const m = document.getElementById('copy-msg');
-    m.style.display = 'inline';
-    setTimeout(() => m.style.display='none', 2000);
-  });
+  if (r.ok) {
+  const msg = document.getElementById('save-msg');
+  msg.style.display = 'inline';
+  setTimeout(() => {
+    msg.style.display = 'none';
+  }, 2000);
 }
-</script>
+  }
+  </script>
 {% endblock %}
