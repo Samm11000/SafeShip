@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Login — SafeShip{% endblock %}
+{% block content %}
+<div style="min-height:calc(100vh - 60px);display:flex;align-items:center;justify-content:center;padding:40px 20px;position:relative;overflow:hidden">
+  <!-- Blobs -->
+  <div style="position:absolute;width:500px;height:500px;background:radial-gradient(circle,#c7d2fe,#a5b4fc);top:-150px;right:-100px;border-radius:50%;filter:blur(80px);opacity:0.35;animation:float 9s ease-in-out infinite;pointer-events:none"></div>
+  <div style="position:absolute;width:350px;height:350px;background:radial-gradient(circle,#ddd6fe,#c4b5fd);bottom:-80px;left:-60px;border-radius:50%;filter:blur(70px);opacity:0.3;animation:float2 11s ease-in-out infinite;pointer-events:none"></div>
+
+  <div style="width:100%;max-width:440px;position:relative;z-index:1;animation:fadeInUp 0.4s ease both">
+    <div style="text-align:center;margin-bottom:32px">
+      <a href="/" style="display:inline-flex;align-items:center;gap:10px;text-decoration:none;margin-bottom:24px">
+        <div style="width:40px;height:40px;border-radius:10px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px">⚓</div>
+        <span style="font-size:22px;font-weight:900;letter-spacing:-0.5px;color:var(--ink)">SafeShip</span>
+      </a>
+      <h1 style="font-size:28px;font-weight:900;letter-spacing:-1px;margin-bottom:8px">Welcome back</h1>
+      <p style="font-family:var(--mono);font-size:13px;color:var(--muted)">Sign in to your dashboard</p>
+    </div>
+
+    <div class="card" style="padding:32px">
+      {% if error %}
+      <div class="alert alert-error" style="margin-bottom:16px">{{ error }}</div>
+      {% endif %}
+
+      <div id="server-error" style="display:none" class="alert alert-error"></div>
+
+      <!-- TAB SWITCHER -->
+      <div style="display:flex;background:var(--bg3);border-radius:100px;padding:3px;margin-bottom:24px">
+        <button id="tab-email" onclick="switchTab('email')" style="flex:1;padding:8px;border-radius:100px;border:none;cursor:pointer;font-family:var(--mono);font-size:12px;background:var(--ink);color:#fff;transition:all 0.15s">Email Login</button>
+        <button id="tab-key" onclick="switchTab('key')" style="flex:1;padding:8px;border-radius:100px;border:none;cursor:pointer;font-family:var(--mono);font-size:12px;background:transparent;color:var(--muted);transition:all 0.15s">API Key Login</button>
+      </div>
+
+      <!-- EMAIL TAB -->
+      <div id="form-email">
+        <div style="margin-bottom:14px">
+          <label style="font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:8px">Email Address</label>
+          <input type="email" id="email" placeholder="you@company.com"/>
+        </div>
+        <div style="margin-bottom:20px">
+          <label style="font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:8px">API Key</label>
+          <input type="password" id="email-api-key" placeholder="Your api_key"/>
+        </div>
+        <button class="btn-primary" style="width:100%;justify-content:center;padding:13px" onclick="loginEmail()">Sign In →</button>
+      </div>
+
+      <!-- API KEY TAB -->
+      <div id="form-key" style="display:none">
+        <div style="margin-bottom:14px">
+          <label style="font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:8px">Tenant ID</label>
+          <input type="text" id="tenant-id" placeholder="e.g. 3fb26044e7bb4ac9"/>
+        </div>
+        <div style="margin-bottom:20px">
+          <label style="font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:8px">API Key</label>
+          <input type="password" id="key-api-key" placeholder="Your full api_key"/>
+        </div>
+        <button class="btn-primary" style="width:100%;justify-content:center;padding:13px" onclick="loginKey()">Sign In →</button>
+      </div>
+    </div>
+
+    <p style="text-align:center;font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:16px">
+      Don't have an account? <a href="/signup" style="color:var(--accent);text-decoration:none">Get API Key →</a>
+    </p>
+  </div>
+</div>
+
+<script>
+// Remember credentials in localStorage
+const saved = JSON.parse(localStorage.getItem('safeship_creds') || '{}');
+if (saved.tenant_id) document.getElementById('tenant-id').value = saved.tenant_id;
+
+function switchTab(tab) {
+  const isEmail = tab === 'email';
+  document.getElementById('form-email').style.display = isEmail ? 'block' : 'none';
+  document.getElementById('form-key').style.display   = isEmail ? 'none'  : 'block';
+  document.getElementById('tab-email').style.background = isEmail ? 'var(--ink)' : 'transparent';
+  document.getElementById('tab-email').style.color      = isEmail ? '#fff' : 'var(--muted)';
+  document.getElementById('tab-key').style.background   = isEmail ? 'transparent' : 'var(--ink)';
+  document.getElementById('tab-key').style.color        = isEmail ? 'var(--muted)' : '#fff';
+}
+
+function showError(msg) {
+  const el = document.getElementById('server-error');
+  el.textContent = msg; el.style.display = 'block';
+}
+
+async function doLogin(payload) {
+  try {
+    const r    = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    const data = await r.json();
+    if (r.ok && data.success) {
+      // Save to localStorage for convenience
+      localStorage.setItem('safeship_creds', JSON.stringify({
+        tenant_id: data.tenant_id,
+        hint: 'Use login page to re-authenticate'
+      }));
+      window.location.href = data.redirect || '/dashboard';
+    } else {
+      showError(data.error || 'Login failed. Check your credentials.');
+    }
+  } catch(e) {
+    showError('Network error. Please try again.');
+  }
+}
+
+function loginEmail() {
+  const email   = document.getElementById('email').value.trim();
+  const api_key = document.getElementById('email-api-key').value.trim();
+  if (!email || !api_key) { showError('Enter both email and API key.'); return; }
+  doLogin({ email, api_key });
+}
+
+function loginKey() {
+  const tenant_id = document.getElementById('tenant-id').value.trim();
+  const api_key   = document.getElementById('key-api-key').value.trim();
+  if (!tenant_id || !api_key) { showError('Enter both Tenant ID and API key.'); return; }
+  doLogin({ tenant_id, api_key });
+}
+
+// Allow Enter key
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const emailTab = document.getElementById('form-email').style.display !== 'none';
+  if (emailTab) loginEmail(); else loginKey();
+});
+</script>
+{% endblock %}
