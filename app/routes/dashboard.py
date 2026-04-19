@@ -516,7 +516,7 @@ def dashboard():
     )
     model_phase    = tenant.get("model_phase",   "base")
     precision      = float(tenant.get("model_precision", 0.851))
-    progress_pct   = min(100, int(labelled_count / 80 * 100))
+    progress_pct   = min(100, int(labelled_count / 5 * 100))
 
     try:
         from scorer import _cache, FEATURE_COLUMNS
