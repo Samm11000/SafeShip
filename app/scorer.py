@@ -12,6 +12,8 @@ HOW TO TEST:
   python app\scorer.py
 """
 
+from app.slack_notifier import send_alert
+
 import os
 import time
 import joblib
@@ -253,6 +255,18 @@ def score_build(features_list, tenant_id="base"):
         "model_phase": phase,
         "top_reasons": top_reasons,
     }
+result = score_build(features, tenant_id)
+
+
+
+
+send_alert(
+    job_name=data.get("job_name", "deploy"),
+    build_number=data.get("build_number", "1"),
+    score_result=result,
+    tenant=tenant
+)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
