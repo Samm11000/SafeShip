@@ -254,7 +254,6 @@ def score_build(features_list, tenant_id="base"):
         "model_phase": phase,
         "top_reasons": top_reasons,
     }
-result = score_build(features, tenant_id)
 
 
 
