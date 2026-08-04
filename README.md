@@ -2,7 +2,9 @@
 
 ## AI-Powered Deployment Risk Intelligence Platform
 
-SafeShip predicts whether a software release is likely to fail **before it reaches production**. It integrates with CI/CD pipelines such as Jenkins, scores deployments in real time, continuously learns from outcomes, and retrains personalized models for each team.
+SafeShip predicts whether a software release is likely to fail **before it reaches production**, watches the service **after** it deploys, and learns from what actually happened.
+
+**It is CI-agnostic.** The API is plain HTTP + JSON, so anything that can make a POST request can gate its deploys — GitHub Actions, Jenkins, GitLab CI, CircleCI, Buildkite, Argo, or a shell script. There is no Jenkins dependency anywhere in the scoring path; Jenkins is simply one adapter, and an optional one.
 
 ---
 
@@ -12,6 +14,8 @@ SafeShip predicts whether a software release is likely to fail **before it reach
 2. How SafeShip Works
 3. System Architecture
 4. Core Features
+4a. Integrations — GitHub Actions, Jenkins, anything
+4b. Sentinel — the post-deploy safety net
 5. Machine Learning Model
 6. Why Random Forest (Current Choice)
 7. Future Upgrade: XGBoost
@@ -59,25 +63,33 @@ SafeShip adds an AI decision layer before deployment.
 
 ## 2. How SafeShip Works
 
-1. Jenkins pipeline calls `/score`
-2. SafeShip extracts deployment signals
-3. ML model predicts risk probability
-4. Returns score (0–100)
-5. Pipeline can allow / warn / block
-6. After deployment, `/log` records real outcome
-7. Nightly retraining improves future predictions
+The full loop — pre-deploy gate, post-deploy watch, and an automatic learning signal:
+
+1. **Score** — your pipeline POSTs build signals to `/score`
+2. **Predict** — the model returns risk `0–100` with the top reasons behind it
+3. **Gate** — pipeline allows / warns / blocks on `SAFE | WARNING | BLOCKED`
+4. **Deploy** — your normal deploy runs, untouched
+5. **Watch** — **Sentinel** probes the service, compares error rate and latency
+   against a baseline, alerts and can **trigger a rollback** if it regresses
+6. **Learn** — the outcome is POSTed to `/log`. Sentinel's exit code supplies the
+   label automatically, so nobody has to remember to report what happened
+7. **Improve** — nightly retraining produces a model personalised to your team
+
+Step 6 is what makes the loop close by itself. A "learns from outcomes" system
+that depends on humans reporting outcomes does not learn.
 
 ---
 
 ## 3. System Architecture
 
-* **Frontend Dashboard**: tenant analytics, setup guide, charts
-* **Flask API**: scoring + logging + auth
-* **S3**: datasets, model files, backups
-* **DynamoDB**: tenant metadata
-* **Lambda**: scheduled retraining jobs
-* **ECR**: stores retraining container image
-* **Jenkins**: CI/CD integration source
+* **Flask API** (gunicorn): scoring, logging, auth
+* **Frontend Dashboard**: tenant analytics, setup guide, charts, live demo
+* **Sentinel**: standalone post-deploy health watchdog + rollback trigger
+* **S3**: per-build records, datasets, model files, backups
+* **DynamoDB**: tenant metadata, hashed API keys, thresholds
+* **Lambda**: scheduled retraining and drift detection
+* **ECR**: retraining container image (ML deps exceed Lambda's zip limit)
+* **Your CI**: any system that can POST — see Integrations below
 
 ---
 
@@ -91,6 +103,75 @@ SafeShip adds an AI decision layer before deployment.
 * API key based access
 * Jenkins-ready setup snippets
 * Multi-tenant SaaS design
+
+---
+
+## 4a. Integrations
+
+Because `/score` and `/log` are ordinary JSON endpoints, integration is a request
+— not a plugin.
+
+### GitHub Actions (reference implementation)
+
+`safeship-demo-app` runs the complete loop on GitHub Actions:
+
+```yaml
+- name: Pre-deploy risk gate (SafeShip /score)
+  run: python3 safeship_gate.py          # exits non-zero if BLOCKED
+
+- name: Deploy
+  run: ./deploy.sh
+
+- name: Post-deploy watch (SafeShip Sentinel)
+  id: watch
+  run: python3 safeship_sentinel.py --url $URL/health --window 120
+
+- name: Log outcome (learning loop)
+  if: always()
+  run: python3 safeship_log.py ${{ steps.watch.outcome == 'success' && '0' || '1' }}
+```
+
+### Jenkins
+
+```groovy
+stage('SafeShip Gate') {
+    steps { sh 'python3 safeship_gate.py' }
+}
+```
+
+### Anything else
+
+```bash
+curl -sX POST "$SAFESHIP_URL/score" -H 'Content-Type: application/json' \
+  -d '{"tenant_id":"...","api_key":"...","diff_size":120,"files_changed":4, ...}'
+```
+
+Only two components are Jenkins-specific, and neither is required:
+`ml/feature_extractor.py` (optionally enriches signals from the Jenkins API) and
+`jenkins/outcome_logger.py`.
+
+---
+
+## 4b. Sentinel — the post-deploy safety net
+
+Scoring guesses before the fact. Sentinel checks reality after it.
+
+It probes your service for a short window, compares error rate and p95 latency
+against a quick baseline, and if things regress it alerts and can run a rollback
+command. It needs **nothing but a URL** — no Datadog, no Prometheus, no
+Kubernetes.
+
+```bash
+python sentinel/safeship_sentinel.py \
+    --url https://myservice/health \
+    --window 120 --interval 5 \
+    --error-rate 0.20 --latency-mult 2.0 \
+    --rollback-cmd "kubectl rollout undo deploy/myservice" \
+    --slack-webhook https://hooks.slack.com/services/...
+```
+
+Exit code `0` = HEALTHY, `1` = DEGRADED — so any CI can gate or roll back on it,
+and that same exit code is what auto-labels the build for retraining.
 
 ---
 
@@ -179,7 +260,7 @@ Used to solve cold start.
 Generated scenarios encode:
 
 * large changes riskier
-  n- hotfixes riskier
+* hotfixes riskier
 * low test pass rate riskier
 * unstable pipelines riskier
 
@@ -318,6 +399,9 @@ ECR stores a Docker image containing:
 
 ## 14. API Endpoints
 
+These four endpoints are the entire integration surface — there is no SDK or
+plugin to install.
+
 ### POST /score
 
 Returns deployment risk score.
@@ -371,27 +455,61 @@ Example internal metrics:
 
 ## 18. Roadmap
 
-* GitHub Actions integration
-* GitLab CI support
-* Slack / Teams alerts
-* XGBoost benchmarking
+Shipped:
+
+* ✅ GitHub Actions integration (reference pipeline in `safeship-demo-app`)
+* ✅ Slack alerts (per-tenant incoming webhook)
+* ✅ Post-deploy watchdog + rollback trigger (Sentinel)
+* ✅ Append-only per-build storage (dashboard cost no longer grows with history)
+
+Next:
+
+* GitLab CI / CircleCI reference pipelines
+* XGBoost benchmarking against Random Forest
 * SHAP explainability
 * Canary deployment signals
-* Kubernetes rollback detection
+* Teams alerts
+
+See `PRODUCTION-PLAN.md` for the path to production readiness.
 
 ---
 
 ## 19. Quick Start
 
-```bash
-# Run API
-python main.py
+### Run it locally — no AWS account needed
 
-# Retrain manually
-python retrain.py
+`run_local.py` starts the real app against an in-process mock of S3 + DynamoDB
+(moto), seeds a demo tenant and sample builds, and prints working credentials.
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+python run_local.py          # → http://127.0.0.1:5000
 ```
 
-Jenkins users can paste the generated SafeShip stage into existing Jenkinsfiles.
+Open the printed dashboard link, or try `/demo` — an interactive scorer that
+needs no API key.
+
+> On macOS, AirPlay Receiver occupies port 5000. Use `PORT=5001 python run_local.py`.
+
+### Run the tests
+
+```bash
+pip install pytest moto
+pytest tests/ -q                # 33 tests, fully mocked, no cloud calls
+```
+
+### Run against real AWS
+
+```bash
+python bootstrap_aws.py          # create buckets + DynamoDB table
+python ml/train_base_model.py    # train the cold-start baseline
+python ml/upload_base_model.py   # publish it to S3
+gunicorn --workers 2 --bind 0.0.0.0:5000 app.main:app
+```
+
+Your CI then calls `/score` — see Integrations above.
 
 ---
 
