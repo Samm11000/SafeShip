@@ -17,6 +17,10 @@ import os
 import json
 import requests
 
+from observability import get_logger
+
+log = get_logger("slack")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # COLOUR MAP for Slack message attachments
 # ─────────────────────────────────────────────────────────────────────────────
@@ -149,7 +153,7 @@ def send_alert(job_name, build_number, score_result, tenant):
 
     # No webhook configured — skip silently, do not crash
     if not webhook_url:
-        print(f"[slack] No webhook configured for tenant {tenant.get('tenant_id','?')} — skipping")
+        log.info("no slack webhook configured; skipping alert", extra={"tenant_id": tenant.get("tenant_id", "?")})
         return False
 
     payload = _build_payload(job_name, build_number, score_result, tenant)
@@ -163,17 +167,17 @@ def send_alert(job_name, build_number, score_result, tenant):
         )
 
         if resp.status_code == 200:
-            print(f"[slack] Alert sent for {job_name} #{build_number} — score {score_result['score']}")
+            log.info("slack alert sent", extra={"job_name": job_name, "build_number": build_number, "score": score_result["score"]})
             return True
         else:
-            print(f"[slack] Webhook returned {resp.status_code}: {resp.text}")
+            log.warning("slack webhook rejected the alert", extra={"status": resp.status_code, "body": resp.text[:200]})
             return False
 
     except requests.exceptions.Timeout:
-        print(f"[slack] Webhook timed out — skipping alert")
+        log.warning("slack webhook timed out; skipping alert")
         return False
     except Exception as e:
-        print(f"[slack] Failed to send alert: {e}")
+        log.error("slack alert failed", extra={"err": str(e)})
         return False
 
 

@@ -1,9 +1,15 @@
-import os, io, json, time, boto3, joblib, tempfile
+import os, io, json, time, uuid, boto3, joblib, tempfile
 import numpy as np
 import pandas as pd
 from decimal import Decimal
 from datetime import datetime, timezone
 from sklearn.ensemble import RandomForestClassifier
+
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from observability import get_logger, set_request_id
+
+log = get_logger("retrain_cron")
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_score, roc_auc_score
 from imblearn.over_sampling import SMOTE
@@ -23,16 +29,16 @@ FEATURES      = [
 
 
 def main():
-    print("\n" + "="*50)
-    print("NIGHTLY RETRAIN -- " + datetime.now(timezone.utc).isoformat())
-    print("="*50)
+    run_id = uuid.uuid4().hex[:12]
+    set_request_id(run_id)   # correlates every line of this run
+    log.info("nightly retrain started", extra={"run_id": run_id})
 
     s3     = boto3.client("s3",         region_name=AWS_REGION)
     dynamo = boto3.resource("dynamodb", region_name=AWS_REGION)
     table  = dynamo.Table(DYNAMO_TABLE)
 
     tenants   = table.scan().get("Items", [])
-    print("Found " + str(len(tenants)) + " tenants")
+    log.info("tenants discovered", extra={"tenant_count": len(tenants)})
 
     retrained = 0
     skipped   = 0
@@ -45,10 +51,11 @@ def main():
         if tid == "demo":
             continue
 
-        print("\nTenant: " + tid + "  (" + str(lc) + " labelled builds)")
+            log.info("evaluating tenant", extra={"tenant_id": tid, "labelled_count": lc})
 
         if lc < MIN_BUILDS:
-            print("  Skipped -- need " + str(MIN_BUILDS) + ", have " + str(lc))
+            log.info("skipped: below minimum labelled builds",
+                     extra={"tenant_id": tid, "have": lc, "need": MIN_BUILDS})
             skipped += 1
             continue
 
@@ -58,7 +65,7 @@ def main():
             df      = df[df["label"].isin([0, 1])].copy()
 
             if len(df) < MIN_BUILDS:
-                print("  Skipped -- insufficient rows in S3")
+                log.info("skipped: insufficient rows in S3", extra={"tenant_id": tid})
                 skipped += 1
                 continue
 
@@ -92,9 +99,10 @@ def main():
                        and len(df) >= MIN_BUILDS
                        and float(y_test.mean()) >= 0.05)
 
-            print("  precision=" + str(round(prec, 3)) +
-                  "  auc=" + str(round(auc, 3)) +
-                  "  passed=" + str(passed))
+            log.info("candidate model evaluated", extra={
+                "tenant_id": tid, "precision": round(prec, 4),
+                "auc_roc": round(auc, 4), "rows": len(df), "passed": bool(passed),
+            })
 
             if passed:
                 tmp = tempfile.mktemp(suffix=".pkl")
@@ -134,21 +142,26 @@ def main():
                         ":t":  datetime.now(timezone.utc).isoformat(),
                     }
                 )
-                print("  SUCCESS -- model swapped")
+                log.info("model promoted to production", extra={
+                    "tenant_id": tid, "s3_key": model_key,
+                    "precision": round(prec, 4), "auc_roc": round(auc, 4),
+                })
                 retrained += 1
             else:
-                print("  FAILED validation -- keeping old model")
+                log.warning("candidate failed validation; keeping current model", extra={
+                    "tenant_id": tid, "precision": round(prec, 4), "auc_roc": round(auc, 4),
+                    "min_precision": MIN_PRECISION, "min_auc": MIN_AUC,
+                })
                 failed += 1
 
         except Exception as e:
-            print("  ERROR: " + str(e))
+            log.exception("retrain failed for tenant", extra={"tenant_id": tid, "err": str(e)})
             failed += 1
 
-    print("\n" + "="*50)
-    print("Retrained: " + str(retrained) +
-          "  Skipped: " + str(skipped) +
-          "  Failed: "  + str(failed))
-    print("="*50 + "\n")
+    log.info("nightly retrain finished", extra={
+        "run_id": run_id, "retrained": retrained,
+        "skipped": skipped, "failed": failed,
+    })
 
 
 if __name__ == "__main__":

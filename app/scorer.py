@@ -18,6 +18,10 @@ import time
 import joblib
 import boto3
 import tempfile
+
+from observability import get_logger
+
+log = get_logger("scorer")
 import numpy as np
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -151,7 +155,7 @@ class ModelCache:
             return self._models[cache_key], self._get_phase(tenant_id)
 
         # Cache miss or expired — reload from S3
-        print(f"[scorer] Loading model for tenant: {tenant_id}")
+        log.info("loading model", extra={"tenant_id": tenant_id})
 
         tenant_key = self._s3_key_for(tenant_id)
         base_key   = self._base_key()
@@ -160,11 +164,11 @@ class ModelCache:
         if tenant_id not in ("base", "demo") and self._model_exists_in_s3(tenant_key):
             model = self._download_model(tenant_key)
             phase = "tenant"
-            print(f"[scorer]   Loaded tenant model from s3://{S3_BUCKET}/{tenant_key}")
+            log.info("loaded tenant model", extra={"tenant_id": tenant_id, "s3_key": tenant_key, "phase": "tenant"})
         else:
             model = self._download_model(base_key)
             phase = "base"
-            print(f"[scorer]   Loaded base model from s3://{S3_BUCKET}/{base_key}")
+            log.info("loaded base model", extra={"s3_key": base_key, "phase": "base"})
 
         self._models[cache_key]     = model
         self._timestamps[cache_key] = now
