@@ -22,15 +22,48 @@ AWS_REGION= os.getenv("AWS_REGION",     "ap-south-1")
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
+from observability import get_logger
+
+log = get_logger("routes.dashboard")
+
 
 def _load_builds(tenant_id, limit=30):
+    """
+    Returns the most recent `limit` builds for a tenant.
+
+    Reads append-only per-build objects (tenant_<id>/builds/*.json) and only
+    fetches the newest `limit` of them, so dashboard cost does not grow with
+    full history. Falls back to the legacy data.csv for pre-migration data.
+    """
+    s3   = boto3.client("s3", region_name=AWS_REGION)
+    rows = []
+
+    # New per-build objects — list metadata (cheap), GET only the newest `limit`
     try:
-        s3  = boto3.client("s3", region_name=AWS_REGION)
-        obj = s3.get_object(Bucket=S3_DATA, Key=f"tenant_{tenant_id}/data.csv")
-        rows = list(csv.DictReader(io.StringIO(obj["Body"].read().decode())))
-        return rows[-limit:] if len(rows) > limit else rows
+        entries = []
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=S3_DATA, Prefix=f"tenant_{tenant_id}/builds/"):
+            for o in page.get("Contents", []):
+                entries.append((o["LastModified"], o["Key"]))
+        entries.sort()
+        for _, key in entries[-limit:]:
+            try:
+                obj = s3.get_object(Bucket=S3_DATA, Key=key)
+                rows.append(json.loads(obj["Body"].read().decode()))
+            except Exception:
+                pass
     except Exception:
-        return []
+        pass
+
+    # Legacy CSV fallback (data written before the per-build migration)
+    if not rows:
+        try:
+            obj = s3.get_object(Bucket=S3_DATA, Key=f"tenant_{tenant_id}/data.csv")
+            rows = list(csv.DictReader(io.StringIO(obj["Body"].read().decode())))
+        except Exception:
+            pass
+
+    return rows[-limit:] if len(rows) > limit else rows
 
 
 def _get_session_tenant():
@@ -177,7 +210,7 @@ def dashboard():
         feat_values = [round(f[1]*100,1) for f in feat_imp]
 
     except Exception as e:
-        print("Feature chart error:", e)
+        log.warning("feature importance chart failed", extra={"err": str(e)})
 
         feat_names = [
             "Recent Failure Rate",

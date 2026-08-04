@@ -85,19 +85,48 @@ def get_all_tenants(table):
 # STEP 2 — Load tenant data from S3
 # ─────────────────────────────────────────────────────────────────────────────
 def load_tenant_data(s3, tenant_id):
-    key = f"tenant_{tenant_id}/data.csv"
-    try:
-        obj     = s3.get_object(Bucket=S3_DATA, Key=key)
-        content = obj["Body"].read().decode("utf-8")
-        df      = pd.read_csv(io.StringIO(content))
+    """
+    Loads all of a tenant's labelled builds for retraining.
 
-        # Only use labelled rows (label = 0 or 1, not -1)
+    Reads the append-only per-build objects (tenant_<id>/builds/*.json) and
+    merges in the legacy data.csv if it still exists (pre-migration data).
+    """
+    try:
+        rows = []
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=S3_DATA, Prefix=f"tenant_{tenant_id}/builds/"):
+            for o in page.get("Contents", []):
+                try:
+                    obj = s3.get_object(Bucket=S3_DATA, Key=o["Key"])
+                    rows.append(json.loads(obj["Body"].read().decode("utf-8")))
+                except Exception:
+                    pass
+
+        frames = []
+        if rows:
+            frames.append(pd.DataFrame(rows))
+
+        # Legacy CSV (data written before the per-build migration)
+        try:
+            obj = s3.get_object(Bucket=S3_DATA, Key=f"tenant_{tenant_id}/data.csv")
+            frames.append(pd.read_csv(io.StringIO(obj["Body"].read().decode("utf-8"))))
+        except Exception:
+            pass
+
+        if not frames:
+            return None
+
+        df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+        # Only use labelled rows (label = 0 or 1, not -1); coerce mixed str/int labels
+        df["label"] = pd.to_numeric(df["label"], errors="coerce")
         df = df[df["label"].isin([0, 1])].copy()
+        df["label"] = df["label"].astype(int)
 
         # Apply 90-day rolling window
         if "timestamp" in df.columns:
             cutoff = int(time.time()) - (90 * 86400)
-            df     = df[df["timestamp"].astype(int) >= cutoff]
+            df     = df[pd.to_numeric(df["timestamp"], errors="coerce").fillna(0).astype(int) >= cutoff]
 
         return df
 

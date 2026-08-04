@@ -12,13 +12,13 @@ PURPOSE:
 """
 
 import os
-import csv
 import uuid
+import json
 import boto3
-import io
 import sys
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
+from pydantic import ValidationError
 
 # Add parent directory to path so we can import app modules
 # Add both app/ and ml/ to path
@@ -34,6 +34,10 @@ from scorer           import score_build
 from dynamo_client    import validate_tenant, increment_build_count, create_tenant
 from slack_notifier   import send_alert
 
+from observability import get_logger
+
+log = get_logger("routes.score")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -44,59 +48,31 @@ score_bp = Blueprint("score", __name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HELPER — append one row to tenant's S3 CSV
+# HELPER — append-only per-build storage in S3
+#
+# Each build is its own small object: tenant_<id>/builds/<build_id>.json
+# This makes /score writes O(1) (one tiny PUT) instead of rewriting the
+# tenant's entire history on every deploy, and removes the lost-update race
+# that the old read-modify-write CSV pattern had under concurrent builds.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _append_to_s3_csv(tenant_id, row_dict):
-    """
-    Appends a single row to tenant's data.csv in S3.
-    If file doesn't exist yet, creates it with headers.
-    Uses read-modify-write pattern (safe for low-frequency writes).
-    """
-    s3  = boto3.client("s3", region_name=AWS_REGION)
-    key = f"tenant_{tenant_id}/data.csv"
+def _build_key(tenant_id, build_id):
+    return f"tenant_{tenant_id}/builds/{build_id}.json"
 
-    COLUMNS = [
-        "build_id", "timestamp", "diff_size", "files_changed",
-        "hour_of_day", "day_of_week", "recent_failure_rate",
-        "test_pass_rate", "is_hotfix", "deployer_exp",
-        "days_since_deploy", "build_time_delta",
-        "predicted_score", "label", "label_source",
-        "sample_weight", "triggered_by", "job_name", "branch_name",
-    ]
 
-    # Try to read existing CSV
-    existing_rows = []
-    try:
-        obj      = s3.get_object(Bucket=S3_DATA_BUCKET, Key=key)
-        content  = obj["Body"].read().decode("utf-8")
-        reader   = csv.DictReader(io.StringIO(content))
-        existing_rows = list(reader)
-    except s3.exceptions.NoSuchKey:
-        pass  # First build — file doesn't exist yet
-    except Exception as e:
-        print(f"[score] Warning: could not read existing CSV: {e}")
-
-    # Add defaults for missing fields
+def _write_build(tenant_id, row_dict):
+    """Persist one build as its own object. O(1), no whole-file rewrite, no race."""
     row_dict.setdefault("label",        -1)
     row_dict.setdefault("label_source", "pending")
     row_dict.setdefault("sample_weight", 1.0)
 
-    existing_rows.append(row_dict)
-
-    # Write back
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=COLUMNS, extrasaction="ignore")
-    writer.writeheader()
-    writer.writerows(existing_rows)
-
+    s3 = boto3.client("s3", region_name=AWS_REGION)
     s3.put_object(
         Bucket      = S3_DATA_BUCKET,
-        Key         = key,
-        Body        = output.getvalue().encode("utf-8"),
-        ContentType = "text/csv",
+        Key         = _build_key(tenant_id, row_dict["build_id"]),
+        Body        = json.dumps(row_dict).encode("utf-8"),
+        ContentType = "application/json",
     )
-    return len(existing_rows)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -166,7 +142,7 @@ def score():
         build_number = data.get("build_number", "?")
         send_alert(job_name, build_number, result, tenant)
     except Exception as e:
-        print(f"[score] Slack alert failed (non-fatal): {e}")
+        log.warning("slack alert failed (non-fatal)", extra={"err": str(e)})
 
     # Step 8: Log to S3 asynchronously (non-blocking)
     try:
@@ -176,11 +152,11 @@ def score():
             "timestamp":       int(datetime.now(timezone.utc).timestamp()),
             "predicted_score": score_val,
         })
-        total_builds = _append_to_s3_csv(features.tenant_id, row)
-        increment_build_count(features.tenant_id)
-        result["total_builds"] = total_builds
+        _write_build(features.tenant_id, row)
+        # build_count lives in DynamoDB (atomic counter) — no need to count S3 objects
+        result["total_builds"] = increment_build_count(features.tenant_id)
     except Exception as e:
-        print(f"[score] S3 logging failed (non-fatal): {e}")
+        log.error("S3 build write failed (non-fatal)", extra={"err": str(e)})
 
     return jsonify(result), 200
 
@@ -212,43 +188,31 @@ def log_outcome():
     if not tenant:
         return jsonify({"error": "Invalid credentials"}), 401
 
-    # Update the label in S3 CSV
+    # Update the label on just this build's object — O(1), no whole-history rewrite
     try:
         s3  = boto3.client("s3", region_name=AWS_REGION)
-        key = f"tenant_{tenant_id}/data.csv"
+        key = _build_key(tenant_id, build_id)
 
-        obj     = s3.get_object(Bucket=S3_DATA_BUCKET, Key=key)
-        content = obj["Body"].read().decode("utf-8")
-        reader  = csv.DictReader(io.StringIO(content))
-        rows    = list(reader)
-        cols    = reader.fieldnames
-
-        updated = False
-        for row in rows:
-            if row.get("build_id") == build_id:
-                row["label"]        = str(label)
-                row["label_source"] = label_src
-                row["sample_weight"] = "1.0" if label_src in ["failure", "safe"] else "0.7"
-                updated = True
-                break
-
-        if not updated:
+        try:
+            obj = s3.get_object(Bucket=S3_DATA_BUCKET, Key=key)
+        except s3.exceptions.NoSuchKey:
             return jsonify({"error": f"build_id {build_id} not found"}), 404
 
-        output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=cols, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+        row = json.loads(obj["Body"].read().decode("utf-8"))
+        row["label"]         = label
+        row["label_source"]  = label_src
+        row["sample_weight"] = 1.0 if label_src in ["failure", "safe"] else 0.7
+
         s3.put_object(
             Bucket=S3_DATA_BUCKET, Key=key,
-            Body=output.getvalue().encode("utf-8"),
-            ContentType="text/csv"
+            Body=json.dumps(row).encode("utf-8"),
+            ContentType="application/json"
         )
 
         return jsonify({"status": "updated", "build_id": build_id, "label": label}), 200
 
     except Exception as e:
-        print(f"[log] Error updating label: {e}")
+        log.error("label update failed", extra={"err": str(e)})
         return jsonify({"error": str(e)}), 500
 
 
@@ -274,7 +238,7 @@ def signup():
             "next_step": "Add the Jenkinsfile stage from /dashboard"
         }), 201
     except Exception as e:
-        print(f"[signup] Error creating tenant: {e}")
+        log.error("tenant signup failed", extra={"err": str(e)})
         return jsonify({"error": str(e)}), 500
 
 
