@@ -9,3 +9,9 @@ pydantic==2.7.1
 joblib==1.4.2
 requests==2.31.0
 gunicorn==22.0.0
+
+# --- Observability & hardening (Phase 1) -----------------------------------
+# sentry-sdk and flask-limiter are optional at runtime: main.py degrades to a
+# warning if they are absent, so a slim deploy still boots.
+flask-limiter==3.8.0
+sentry-sdk[flask]==2.14.0
