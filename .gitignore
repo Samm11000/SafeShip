@@ -1,9 +1,80 @@
+# ---------------------------------------------------------------------------
+# Python virtual environments
+#
+# `.venv/` (with the leading dot) is the one that actually exists in this repo —
+# without it git reports ~11,800 untracked files and a stray `git add -A` would
+# commit the entire virtualenv.
+# ---------------------------------------------------------------------------
+.venv/
 venv/
+env/
+ENV/
+.python-version
+
+# --- Python bytecode & build ------------------------------------------------
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Test & type-check caches ----------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Secrets
+#
+# NOTE: ansible/inventory.ini is tracked and contains the deploy host's public
+# IP and SSH user. The key itself is never committed (*.pem below), but on a
+# public repo that file does advertise the box — consider templating it.
+# ---------------------------------------------------------------------------
 .env
+.env.*
+!.env.example
 *.pem
-node_modules/
+*.key
+id_rsa*
+*credentials*
+!ml/**/*credentials*
+
+# --- Infrastructure state --------------------------------------------------
 terraform/.terraform/
 *.tfstate
 *.tfstate.backup
+.serverless/
+
+# ---------------------------------------------------------------------------
+# Lambda / packaging artifacts
+#
+# The ML deps outgrew Lambda's 250 MB zip limit (hence the ECR image), so any
+# local zip is a build artifact, never source.
+# ---------------------------------------------------------------------------
+*.zip
+lambda/**/out.json
+
+# ---------------------------------------------------------------------------
+# ML artifacts
+#
+# Deliberately NOT ignoring ml/data/base_model.pkl or synthetic_builds.csv:
+# both are versioned on purpose — they are the cold-start baseline the README
+# describes, and Ansible ships them to the server. Only *derived* per-run
+# output is ignored here.
+# ---------------------------------------------------------------------------
+ml/data/tenants/
+ml/data/*_run_*.csv
+ml/data/retrained_*.pkl
+mlruns/
+
+# --- OS & editor -----------------------------------------------------------
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.idea/
+
+# --- JS (dashboard tooling, if any) ----------------------------------------
+node_modules/
