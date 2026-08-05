@@ -1,0 +1,166 @@
+name: 'SafeShip Deployment Risk Gate'
+description: 'Measure this build and ask SafeShip how risky the deploy is. Fails open by design.'
+author: 'SafeShip'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TWO THINGS YOUR WORKFLOW MUST DO — see action/gate/README.md for detail.
+#
+#   permissions:
+#     contents: read
+#     actions: read          # else the runs API 403s and build history is lost
+#
+#   - uses: actions/checkout@v4
+#     with: { fetch-depth: 2 }   # else `git diff HEAD~1` fails and diff_size is lost
+#
+# Neither is guessable, and without them the score quietly rests on imputed
+# values instead of measurements. The action warns loudly when either is missing
+# rather than pretending it measured something.
+# ─────────────────────────────────────────────────────────────────────────────
+
+inputs:
+  tenant-id:
+    description: 'Your SafeShip tenant ID. Store as a secret.'
+    required: true
+  api-key:
+    description: 'Your SafeShip API key. Store as a secret.'
+    required: true
+  url:
+    description: 'SafeShip base URL.'
+    required: false
+    default: ''
+  mode:
+    description: 'score (gate the deploy) | log (record the outcome) | collect (debug, no network)'
+    required: false
+    default: 'score'
+  label:
+    description: 'For mode=log only. 0 = the deploy was fine, 1 = it broke.'
+    required: false
+    default: '0'
+  fail-open:
+    description: >-
+      When true (the default), a BLOCKED verdict is reported loudly but the
+      workflow continues. Start here: run advisory-only until you trust the
+      scores, then set false to actually enforce. Note this controls only the
+      BLOCKED verdict — a SafeShip outage, timeout or bug ALWAYS fails open and
+      is not configurable.
+    required: false
+    default: 'true'
+  github-token:
+    description: 'Token used to read this workflow''s run history. Needs actions:read.'
+    required: false
+    default: ${{ github.token }}
+  working-directory:
+    description: 'Repository root to inspect.'
+    required: false
+    default: '.'
+  timeout:
+    description: 'Seconds to wait for SafeShip before giving up and proceeding.'
+    required: false
+    default: '10'
+  build-id-file:
+    description: 'Where mode=score stores the build_id for a later mode=log step.'
+    required: false
+    default: 'safeship_build_id.txt'
+  extra-args:
+    description: 'Additional CLI flags, e.g. --no-history or --diff-size 400.'
+    required: false
+    default: ''
+
+outputs:
+  score:
+    description: 'Risk score 0-100. Empty if SafeShip was unreachable.'
+    value: ${{ steps.gate.outputs.score }}
+  verdict:
+    description: 'SAFE | REVIEW | BLOCKED | UNAVAILABLE'
+    value: ${{ steps.gate.outputs.verdict }}
+  build-id:
+    description: 'SafeShip build ID, for a later mode=log step.'
+    value: ${{ steps.gate.outputs.build-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Every input reaches bash through `env:` and is read as "$VAR", never
+    # interpolated into the script body as ${{ }}. Interpolation splices the value
+    # into the shell source before it runs, so a value containing shell syntax
+    # would execute — the standard composite-action injection. Quoting "$VAR"
+    # cannot be escaped this way.
+    - name: Check prerequisites
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SAFESHIP_URL: ${{ inputs.url }}
+      run: |
+        # Warnings, never errors: this action must not be the reason a pipeline
+        # fails. Both of these silently degrade the score, and neither is
+        # guessable from inside the runner.
+        if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+          echo "::warning title=SafeShip::Shallow checkout detected. diff_size and files_changed cannot be measured, so they will be estimated. Add 'with: {fetch-depth: 2}' to actions/checkout (use 0 for accurate pull-request bases)."
+        fi
+        if [ -z "$SAFESHIP_URL" ]; then
+          echo "::error title=SafeShip::No SafeShip URL. Pass 'url:' to the action."
+        fi
+
+    - name: SafeShip
+      id: gate
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SAFESHIP_URL: ${{ inputs.url }}
+        SAFESHIP_TENANT_ID: ${{ inputs.tenant-id }}
+        SAFESHIP_API_KEY: ${{ inputs.api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        SS_MODE: ${{ inputs.mode }}
+        SS_LABEL: ${{ inputs.label }}
+        SS_FAIL_OPEN: ${{ inputs.fail-open }}
+        SS_TIMEOUT: ${{ inputs.timeout }}
+        SS_BUILD_ID_FILE: ${{ inputs.build-id-file }}
+        SS_EXTRA_ARGS: ${{ inputs.extra-args }}
+        # push events carry the trigger time as an epoch integer; other event
+        # types omit it, and the collector then leaves build_time_delta unknown
+        # rather than inventing a duration.
+        SAFESHIP_RUN_STARTED_AT: ${{ github.event.repository.pushed_at }}
+      run: |
+        set -o pipefail
+
+        # safeship_ci ships at the root of the repo this action lives in, which
+        # the runner has already checked out in order to run the action. No
+        # install step, no network, no dependency tree — the package is
+        # stdlib-only precisely so this can be a single python3 invocation.
+        PKG_ROOT="$(cd "$GITHUB_ACTION_PATH/../.." && pwd)"
+        if [ ! -d "$PKG_ROOT/safeship_ci" ]; then
+          echo "::warning title=SafeShip::Could not locate the safeship_ci package at $PKG_ROOT — skipping the gate."
+          exit 0
+        fi
+        export PYTHONPATH="$PKG_ROOT:$PYTHONPATH"
+
+        # Deliberately unquoted: extra-args is a flag list from the workflow
+        # author and must word-split. Everything else is quoted.
+        # shellcheck disable=SC2086
+        case "$SS_MODE" in
+          score)
+            FLAGS=""
+            [ "$SS_FAIL_OPEN" = "true" ] && FLAGS="--fail-open"
+            python3 -m safeship_ci score \
+              --timeout "$SS_TIMEOUT" \
+              --build-id-file "$SS_BUILD_ID_FILE" \
+              $FLAGS $SS_EXTRA_ARGS
+            ;;
+          log)
+            python3 -m safeship_ci log "$SS_LABEL" \
+              --timeout "$SS_TIMEOUT" \
+              --build-id-file "$SS_BUILD_ID_FILE" \
+              $SS_EXTRA_ARGS
+            ;;
+          collect)
+            python3 -m safeship_ci collect $SS_EXTRA_ARGS
+            ;;
+          *)
+            echo "::error title=SafeShip::Unknown mode '$SS_MODE' (expected score, log or collect)."
+            exit 1
+            ;;
+        esac

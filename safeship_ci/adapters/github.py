@@ -227,9 +227,25 @@ def _epoch(value: Optional[str]) -> Optional[float]:
     would misread every timestamp by an hour for half the year — enough to make
     days_since_deploy wrong.
     """
-    if not value or not isinstance(value, str):
+    if value is None:
         return None
-    txt = value.strip().replace("Z", "+0000")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+
+    txt = value.strip()
+    if not txt:
+        return None
+    # Some GitHub payload fields carry epoch seconds rather than ISO-8601 —
+    # `repository.pushed_at` on a push event is an integer, and the composite
+    # action passes it through as SAFESHIP_RUN_STARTED_AT.
+    try:
+        return float(txt)
+    except ValueError:
+        pass
+
+    txt = txt.replace("Z", "+0000")
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"):
         try:
             parsed = time.strptime(txt, fmt)
