@@ -128,13 +128,22 @@ def log_outcome(url: str, tenant_id: str, api_key: str, build_id: str,
     POST /log. label 0 = deploy was fine, 1 = it broke.
 
     This is the training signal. Without it the model never learns from reality.
+
+    The default source says where the label came from: CI status, which is a
+    weaker signal than an actual production check. It used to send "failure" /
+    "success", and the server's weighting list contained "failure" and "safe" —
+    so every successful deploy fell through to a lower sample_weight because of a
+    string mismatch nothing would ever surface. `ci_failure` / `ci_success` are
+    the canonical names (app/labels.py); Sentinel sends `sentinel_*` instead,
+    which is trusted more because it observed production rather than inferring
+    from a pipeline.
     """
     return post(url, "/log", {
         "tenant_id": tenant_id,
         "api_key": api_key,
         "build_id": build_id,
         "label": int(label),
-        "label_source": source or ("failure" if int(label) == 1 else "success"),
+        "label_source": source or ("ci_failure" if int(label) == 1 else "ci_success"),
     }, **kw)
 
 

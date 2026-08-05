@@ -220,7 +220,11 @@ def test_log_updates_only_that_build_object(client, creds):
     })
     after = json.loads(s3.get_object(Bucket="deploy-gate-data", Key=key)["Body"].read())
     assert after["label"] == 1
-    assert after["label_source"] == "failure"
+    # "failure" is a legacy alias, kept working for older pipelines, but it is
+    # stored under its canonical name so the dataset has a single vocabulary —
+    # which is what makes sample_weight mean anything. See app/labels.py.
+    assert after["label_source"] == "ci_failure"
+    assert after["sample_weight"] == 0.7
 
 
 def test_log_unknown_build_404(client, creds):

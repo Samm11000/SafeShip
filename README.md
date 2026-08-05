@@ -282,8 +282,34 @@ python sentinel/safeship_sentinel.py \
     --slack-webhook https://hooks.slack.com/services/...
 ```
 
-Exit code `0` = HEALTHY, `1` = DEGRADED — so any CI can gate or roll back on it,
-and that same exit code is what auto-labels the build for retraining.
+Exit code `0` = HEALTHY, `1` = DEGRADED — so any CI can gate or roll back on it.
+
+### It labels the build itself
+
+Given credentials (`SAFESHIP_URL`, `SAFESHIP_TENANT_ID`, `SAFESHIP_API_KEY`) it
+posts the outcome to `/log` when the window closes, against the build the risk gate
+scored. So the learning loop needs no extra pipeline step — and an optional step
+that teaches the model is exactly the step people don't add.
+
+This matters beyond convenience, because **Sentinel's verdict is better evidence
+than a pipeline's exit code:**
+
+- A pipeline that fails *before* the deploy step never deployed. Labelling that as
+  a deploy failure is simply wrong — it is a fact about your tests, not about
+  deployment risk.
+- A pipeline that goes green while production breaks is the most valuable row in
+  the dataset, and pipeline status will never reveal it.
+
+So `sentinel_healthy` / `sentinel_degraded` are weighted 1.0 during retraining
+while `ci_success` / `ci_failure` are weighted lower, and **an observation is never
+overwritten by an inference** — if Sentinel has already reported what it saw, a
+later pipeline-status fallback is rejected and says why. See
+[`app/labels.py`](app/labels.py) for the full taxonomy.
+
+Both outcomes are reported, not just failures: successes are the majority class,
+and a model that has never seen a normal deploy cannot recognise an abnormal one.
+Labelling failures never changes the exit code — losing a label costs one row,
+while failing a pipeline costs a deploy.
 
 ---
 

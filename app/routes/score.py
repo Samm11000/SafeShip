@@ -16,6 +16,7 @@ import uuid
 import json
 import boto3
 import sys
+import time
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 from pydantic import ValidationError
@@ -34,6 +35,8 @@ from scorer           import score_build
 from dynamo_client    import (validate_tenant, increment_build_count, create_tenant,
                               actor_build_count, increment_actor_build)
 from imputation       import impute, invalidate as invalidate_medians
+from labels           import describe as describe_label
+from labels           import is_observed as already_observed
 from features         import FEATURES
 from slack_notifier   import send_alert
 
@@ -274,9 +277,41 @@ def log_outcome():
             return jsonify({"error": f"build_id {build_id} not found"}), 404
 
         row = json.loads(obj["Body"].read().decode("utf-8"))
+
+        # Provenance decides how much this row counts when retraining. The rule
+        # used to be an inline `1.0 if label_src in ["failure", "safe"] else 0.7`,
+        # which meant safeship_ci's "success" fell through to 0.7 — the most
+        # common label in the dataset, down-weighted by a string mismatch that
+        # nothing would ever surface. See app/labels.py.
+        canonical, weight, observed = describe_label(label_src)
+
+        # An observation outranks an inference, whichever arrives second.
+        # Pipelines commonly do both: Sentinel probes production and reports what
+        # it saw, then a post-build hook reports the pipeline's exit status as a
+        # fallback. Letting the fallback win would replace "production degraded"
+        # with "the pipeline was green" — discarding the better evidence and, in
+        # the case that matters most, inverting the label.
+        if already_observed(row.get("label_source")) and not observed:
+            log.info("keeping the observed label over an inferred one",
+                     extra={"tenant_id": tenant_id, "build_id": build_id,
+                            "kept": row.get("label_source"), "ignored": canonical})
+            return jsonify({
+                "status": "kept",
+                "build_id": build_id,
+                "label": row.get("label"),
+                "label_source": row.get("label_source"),
+                "sample_weight": row.get("sample_weight"),
+                "observed": True,
+                "note": (f"{canonical} ignored: this build was already labelled by "
+                         f"{row.get('label_source')}, which observed production "
+                         "rather than inferring from pipeline status"),
+            }), 200
+
         row["label"]         = label
-        row["label_source"]  = label_src
-        row["sample_weight"] = 1.0 if label_src in ["failure", "safe"] else 0.7
+        row["label_source"]  = canonical
+        row["sample_weight"] = weight
+        row["label_observed"] = observed
+        row["labelled_at"]   = int(time.time())
 
         s3.put_object(
             Bucket=S3_DATA_BUCKET, Key=key,
@@ -284,7 +319,19 @@ def log_outcome():
             ContentType="application/json"
         )
 
-        return jsonify({"status": "updated", "build_id": build_id, "label": label}), 200
+        log.info("build labelled",
+                 extra={"tenant_id": tenant_id, "build_id": build_id,
+                        "label": label, "label_source": canonical,
+                        "sample_weight": weight, "observed": observed})
+
+        return jsonify({
+            "status": "updated", "build_id": build_id, "label": label,
+            # Echoed so a caller can see that its source was recognised. A label
+            # accepted at 0.5 because the source was a typo should be visible.
+            "label_source": canonical,
+            "sample_weight": weight,
+            "observed": observed,
+        }), 200
 
     except Exception as e:
         log.error("label update failed", extra={"err": str(e)})

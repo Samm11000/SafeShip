@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -209,6 +210,91 @@ def _run_cmd(cmd: str) -> int:  # pragma: no cover - shells out
     return subprocess.run(cmd, shell=True, check=False).returncode
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Labelling — closing the learning loop
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Sentinel is the only component that actually looks at production after a
+# deploy, which makes it the best source of ground truth SafeShip will ever get.
+# Reporting from here rather than from a separate pipeline step matters twice
+# over:
+#
+#   - the label reflects OBSERVED production health, not pipeline status. A
+#     pipeline that fails before the deploy step never deployed, so labelling it
+#     as a deploy failure is simply wrong; and a green pipeline over a broken
+#     production is the most valuable row in the dataset and CI status will never
+#     reveal it.
+#   - nobody has to remember to add the step. An optional step that teaches the
+#     model does not get added, and then the model never improves.
+#
+# These two strings are duplicated from app/labels.py::OBSERVED because Sentinel
+# ships standalone into customers' pipelines and cannot import server code.
+# tests/test_sentinel.py pins them.
+
+LABEL_HEALTHY = "sentinel_healthy"
+LABEL_DEGRADED = "sentinel_degraded"
+
+
+def read_build_id(build_id: Optional[str], build_id_file: Optional[str]) -> str:
+    """An explicit --build-id wins; otherwise read the file `safeship score` wrote."""
+    if build_id:
+        return build_id.strip()
+    if build_id_file and os.path.isfile(build_id_file):
+        try:
+            with open(build_id_file, "r", encoding="utf-8") as fh:
+                return fh.read().strip()
+        except OSError:
+            return ""
+    return ""
+
+
+def report_outcome(
+    report: Report,
+    safeship_url: str,
+    tenant_id: str,
+    api_key: str,
+    build_id: str,
+    timeout: float = 10.0,
+    opener: Optional[Callable] = None,
+) -> str:
+    """
+    POST the observed outcome to SafeShip /log. Returns a short status string.
+
+    Never raises, and the caller never lets it change the exit code: failing to
+    record a label costs the model one data point, while failing a pipeline over
+    it would cost the user a deploy. Those are not comparable.
+    """
+    if not (safeship_url and tenant_id and api_key):
+        return "skipped (no SafeShip credentials)"
+    if not build_id:
+        return "skipped (no build_id — did the risk gate run first?)"
+
+    label = 0 if report.healthy else 1
+    source = LABEL_HEALTHY if report.healthy else LABEL_DEGRADED
+    payload = json.dumps({
+        "tenant_id": tenant_id,
+        "api_key": api_key,
+        "build_id": build_id,
+        "label": label,
+        "label_source": source,
+    }).encode()
+
+    endpoint = safeship_url.rstrip("/") + "/log"
+    req = urllib.request.Request(
+        endpoint, data=payload,
+        headers={"Content-Type": "application/json",
+                 "User-Agent": "safeship-sentinel/1.0"},
+        method="POST",
+    )
+    try:
+        send = opener or urllib.request.urlopen
+        with send(req, timeout=timeout) as resp:
+            resp.read()
+        return f"recorded label={label} ({source})"
+    except Exception as e:                     # pragma: no cover - network paths
+        return f"could not record label ({type(e).__name__}: {e})"
+
+
 def act_on(
     report: Report,
     rollback_cmd: Optional[str] = None,
@@ -280,6 +366,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--rollback-cmd", default=None, help="shell command to run on DEGRADED")
     ap.add_argument("--slack-webhook", default=None, help="Slack webhook to notify on DEGRADED")
     ap.add_argument("--json", action="store_true", help="emit JSON instead of a report")
+
+    lbl = ap.add_argument_group(
+        "outcome reporting",
+        "Record what was observed against the build the risk gate scored. This is "
+        "the model's only ground truth — without it SafeShip never learns whether "
+        "its predictions were right.")
+    lbl.add_argument("--safeship-url", default=os.getenv("SAFESHIP_URL", ""),
+                     help="[SAFESHIP_URL]")
+    lbl.add_argument("--tenant-id", default=os.getenv("SAFESHIP_TENANT_ID", ""),
+                     help="[SAFESHIP_TENANT_ID]")
+    lbl.add_argument("--api-key", default=os.getenv("SAFESHIP_API_KEY", ""),
+                     help="[SAFESHIP_API_KEY]")
+    lbl.add_argument("--build-id", default=None,
+                     help="build to label (default: read from --build-id-file)")
+    lbl.add_argument("--build-id-file", default="safeship_build_id.txt",
+                     help="file written by `safeship score` (default %(default)s)")
+    lbl.add_argument("--no-label", action="store_true",
+                     help="watch only; do not report the outcome")
+
     args = ap.parse_args(argv)
 
     report = run_watch(
@@ -294,6 +399,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     actions = act_on(report, rollback_cmd=args.rollback_cmd, slack_webhook=args.slack_webhook)
 
+    # Report on BOTH outcomes, not just failures. A model trained only on the
+    # deploys that went wrong has no idea what a normal one looks like, and
+    # successes are the majority class — skipping them would bias the data far
+    # more than missing the occasional failure.
+    label_status = "disabled (--no-label)"
+    if not args.no_label:
+        label_status = report_outcome(
+            report,
+            safeship_url=args.safeship_url,
+            tenant_id=args.tenant_id,
+            api_key=args.api_key,
+            build_id=read_build_id(args.build_id, args.build_id_file),
+        )
+
     if args.json:
         print(json.dumps({
             "verdict": report.verdict,
@@ -304,12 +423,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             "baseline_p50_ms": round(report.baseline_p50, 1) if report.baseline_p50 else None,
             "reasons": report.reasons,
             "actions_taken": actions,
+            "label": label_status,
         }))
     else:
         print(render(report))
         if actions:
-            print(f"  actions taken: {', '.join(actions)}\n")
+            print(f"  actions taken: {', '.join(actions)}")
+        print(f"  safeship      {label_status}\n")
 
+    # The exit code reflects production health only. Labelling is bookkeeping and
+    # must never be the reason a pipeline fails.
     return 0 if report.healthy else 1
 
 

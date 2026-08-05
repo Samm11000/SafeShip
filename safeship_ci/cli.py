@@ -206,7 +206,14 @@ def cmd_log(args) -> int:
 
 
 def cmd_watch(args) -> int:
-    """Delegates to the Sentinel script, which already does this well."""
+    """
+    Delegates to the Sentinel script, which already does this well.
+
+    Credentials are passed through so Sentinel can record the outcome itself.
+    That closes the learning loop without a separate `safeship log` step — and
+    the label then describes what Sentinel *observed* in production rather than
+    what the pipeline's exit status implied, which is a materially better signal.
+    """
     import subprocess
 
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -214,12 +221,29 @@ def cmd_watch(args) -> int:
     if not os.path.isfile(sentinel):
         error(f"sentinel not found at {sentinel}")
         return EXIT_USAGE
+
     cmd = [sys.executable, sentinel, "--url", args.url_to_watch]
     for flag, value in (("--window", args.window), ("--interval", args.interval)):
         if value is not None:
             cmd += [flag, str(value)]
     if args.rollback_cmd:
         cmd += ["--rollback-cmd", args.rollback_cmd]
+
+    if args.no_label:
+        cmd += ["--no-label"]
+    else:
+        url = args.url or os.getenv("SAFESHIP_URL", "")
+        tenant = args.tenant_id or os.getenv("SAFESHIP_TENANT_ID", "")
+        key = args.api_key or os.getenv("SAFESHIP_API_KEY", "")
+        if url and tenant and key:
+            cmd += ["--safeship-url", url, "--tenant-id", tenant, "--api-key", key,
+                    "--build-id-file", args.build_id_file]
+        else:
+            # Watching still works without them; it just teaches nothing.
+            warn("no SafeShip credentials — watching but not recording the "
+                 "outcome, so this deploy will not train the model")
+            cmd += ["--no-label"]
+
     return subprocess.call(cmd)
 
 
@@ -305,10 +329,20 @@ def build_parser() -> argparse.ArgumentParser:
     co.set_defaults(func=cmd_collect)
 
     wa = sub.add_parser("watch", help="post-deploy health watch (Sentinel)")
-    wa.add_argument("--url", dest="url_to_watch", required=True)
+    wa.add_argument("--url", dest="url_to_watch", required=True,
+                    help="service URL to probe")
     wa.add_argument("--window", type=int)
     wa.add_argument("--interval", type=int)
     wa.add_argument("--rollback-cmd")
+    # Credentials so the watch can record its own verdict. Named --safeship-url
+    # here because --url already means "the service to probe".
+    wa.add_argument("--safeship-url", dest="url",
+                    help="SafeShip base URL [SAFESHIP_URL]")
+    wa.add_argument("--tenant-id", help="[SAFESHIP_TENANT_ID]")
+    wa.add_argument("--api-key", help="[SAFESHIP_API_KEY]")
+    wa.add_argument("--build-id-file", default="safeship_build_id.txt")
+    wa.add_argument("--no-label", action="store_true",
+                    help="watch only; do not record the outcome")
     wa.set_defaults(func=cmd_watch)
 
     return p
