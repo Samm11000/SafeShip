@@ -34,6 +34,7 @@ from observability import (
 )
 from routes.score import score_bp
 from routes.dashboard import dashboard_bp
+from routes.setup import setup_bp
 
 log = get_logger("app.main")
 
@@ -196,6 +197,7 @@ def create_app() -> Flask:
     # Auth routes (/login, /logout) live on dashboard_bp; blueprints own all routes.
     app.register_blueprint(score_bp)
     app.register_blueprint(dashboard_bp)
+    app.register_blueprint(setup_bp)
 
     # ---------------------------------------------------------------- requests
     @app.before_request

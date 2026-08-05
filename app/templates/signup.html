@@ -73,7 +73,10 @@
           <div style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">API Key</div>
           <div style="font-family:var(--mono);font-size:13px;color:var(--amber);word-break:break-all" id="out-key"></div>
         </div>
-        <a id="dash-link" href="#" class="btn-primary" style="width:100%;justify-content:center;padding:13px">Open Dashboard →</a>
+        <!-- Straight into setup, not the dashboard: a fresh tenant has no builds,
+             so the dashboard is an empty page and the real next step is telling
+             us which CI you use. -->
+        <a id="dash-link" href="#" class="btn-primary" style="width:100%;justify-content:center;padding:13px">Connect your pipeline →</a>
       </div>
 
       <!-- Existing account -->
@@ -138,7 +141,7 @@ async function signup() {
     const data = await r.json();
     document.getElementById('out-tenant').textContent = data.tenant_id;
     document.getElementById('out-key').textContent    = data.api_key;
-    document.getElementById('dash-link').href = `/dashboard?tenant_id=${data.tenant_id}&api_key=${data.api_key}`;
+    document.getElementById('dash-link').href = `/setup?tenant_id=${data.tenant_id}&api_key=${data.api_key}`;
     document.getElementById('result-card').style.display = 'block';
     document.getElementById('result-card').scrollIntoView({behavior:'smooth'});
   } catch(e) { alert('Error — please try again'); }

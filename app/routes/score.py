@@ -310,7 +310,10 @@ def signup():
             "tenant_id": result["tenant_id"],
             "api_key":   result["api_key"],
             "message":   "Save your api_key — it will not be shown again.",
-            "next_step": "Add the Jenkinsfile stage from /dashboard"
+            # Was "Add the Jenkinsfile stage from /dashboard", which assumed
+            # Jenkins for everyone. /setup asks which CI you actually use.
+            "next_step": "Connect your pipeline at /setup",
+            "setup_url": "/setup",
         }), 201
     except Exception as e:
         log.error("tenant signup failed", extra={"err": str(e)})

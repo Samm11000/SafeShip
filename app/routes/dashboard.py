@@ -17,9 +17,16 @@ from dynamo_client import (validate_tenant, create_tenant,
 from scorer    import score_build
 from validator import BuildFeatures
 from features   import FEATURES
+import integrations
+from integrations import public_base_url
 
 S3_DATA   = os.getenv("S3_DATA_BUCKET", "deploy-gate-data")
 AWS_REGION= os.getenv("AWS_REGION",     "ap-south-1")
+
+# Kept in step with lambda/retrain/handler.py::MIN_BUILDS, which cannot be
+# imported from here because its package is literally named `lambda`, a Python
+# keyword. Pinned by tests/test_setup.py so the two cannot drift.
+RETRAIN_MIN_BUILDS = 200
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -203,7 +210,10 @@ def dashboard():
     )
     model_phase    = tenant.get("model_phase",   "base")
     precision      = float(tenant.get("model_precision", 0.851))
-    progress_pct   = min(100, int(labelled_count / 5 * 100))
+    # Progress toward getting your own model, so it has to use the threshold the
+    # retrain job actually enforces. This divided by 5 — the old MIN_BUILDS —
+    # and so showed 100% at five labelled builds while retraining now needs 200.
+    progress_pct   = min(100, int(labelled_count / RETRAIN_MIN_BUILDS * 100))
 
     try:
         from scorer import _cache, FEATURE_COLUMNS
@@ -230,89 +240,21 @@ def dashboard():
             ]
 
         feat_values = [28,25,18,11,8]
-    env_block = f"""environment {{
-    SAFESHIP_URL       = 'http://54.89.160.150'
-    SAFESHIP_TENANT_ID = '{tenant_id}'
-    SAFESHIP_API_KEY   = '{api_key}'
-    }}"""
-    risk_stage = """stage('SafeShip Risk Check') {
-  steps {
-    script {
-
-      def diffStat = sh(
-        script: "git diff --stat HEAD~1 HEAD 2>/dev/null | tail -1 || echo '0'",
-        returnStdout: true
-      ).trim()
-
-      def added   = (diffStat =~ /(\\d+) insertion/) ? (diffStat =~ /(\\d+) insertion/)[0][1].toInteger() : 0
-      def deleted = (diffStat =~ /(\\d+) deletion/)  ? (diffStat =~ /(\\d+) deletion/)[0][1].toInteger() : 0
-      def diffSize = added + deleted
-
-      def now = new Date()
-
-      def payload = \"\"\"{
-        "tenant_id":"${env.SAFESHIP_TENANT_ID}",
-        "api_key":"${env.SAFESHIP_API_KEY}",
-        "diff_size":${diffSize},
-        "files_changed":5,
-        "hour_of_day":${now.hours},
-        "day_of_week":${now.day},
-        "recent_failure_rate":0.0,
-        "test_pass_rate":1.0,
-        "is_hotfix":0,
-        "deployer_exp":30,
-        "days_since_deploy":2,
-        "build_time_delta":0.0
-      }\"\"\"
-
-      def res = sh(
-        script: "curl -s -X POST ${env.SAFESHIP_URL}/score -H 'Content-Type: application/json' -d '${payload}'",
-        returnStdout:true
-      ).trim()
-
-      def result = readJSON text: res
-
-      env.DG_BUILD_ID = result.build_id
-
-      echo "SafeShip Score: ${result.score}"
-
-      if (result.verdict == 'BLOCKED') {
-        error("SafeShip blocked deployment")
-      }
-    }
-  }
-}"""
-    post_block = """script {
-
-    if (env.DG_BUILD_ID?.trim()) {
-
-        def finalLabel = (currentBuild.currentResult == 'SUCCESS') ? 0 : 1
-        def sourceTxt  = (finalLabel == 0) ? "safe" : "failure"
-
-        def payload = \"\"\"{
-        "tenant_id":"${env.SAFESHIP_TENANT_ID}",
-        "api_key":"${env.SAFESHIP_API_KEY}",
-        "build_id":"${env.DG_BUILD_ID}",
-        "label":${finalLabel},
-        "label_source":"${sourceTxt}"
-        }\"\"\"
-
-        sh "curl -s -X POST ${env.SAFESHIP_URL}/log -H 'Content-Type: application/json' -d '${payload}'"
-    }
-
-    }"""
-    jenkinsfile = f"""stage('SafeShip Risk Check') {{
-    steps {{
-        script {{
-            def res = sh(script: \"\"\"curl -s -X POST http://YOUR-EC2-IP/score \\\\
-              -H 'Content-Type: application/json' \\\\
-              -d '{{"tenant_id":"{tenant_id}","api_key":"{api_key}","hour_of_day":${{new Date().hours}},"day_of_week":${{new Date().day}},"diff_size":${{env.GIT_DIFF_SIZE ?: 100}},"recent_failure_rate":0.0}}'\"\"\", returnStdout:true).trim()
-            def result = readJSON text: res
-            if (result.verdict == 'BLOCKED') error("SafeShip: ${{result.score}}/100 blocked")
-            echo "SafeShip: ${{result.score}}/100 - ${{result.verdict}}"
-        }}
-    }}
-}}"""
+    # The pipeline snippet used to be built right here: ~80 lines of Jenkins
+    # Groovy, rendered unconditionally whatever CI the tenant actually used, and
+    # hardcoding seven of the ten features ("files_changed":5,
+    # "recent_failure_rate":0.0, "test_pass_rate":1.0, "deployer_exp":30, ...).
+    # Anyone who followed it got a score that barely depended on their build.
+    # It now comes from app/integrations/<platform>.py and calls safeship_ci.
+    integration = None
+    ci_platform = tenant.get("ci_platform", "")
+    if integrations.is_valid(ci_platform):
+        try:
+            integration = integrations.describe(
+                ci_platform, tenant_id, api_key, public_base_url())
+        except Exception as exc:            # pragma: no cover - never break the page
+            log.warning("could not build integration snippet",
+                        extra={"tenant_id": tenant_id, "err": str(exc)})
 
     return render_template("dashboard.html",
         tenant=tenant, tenant_id=tenant_id, api_key=api_key,
@@ -323,10 +265,8 @@ def dashboard():
         progress_pct=progress_pct,
         recent_builds=list(reversed(builds))[:10],
         feat_names=json.dumps(feat_names), feat_values=json.dumps(feat_values),
-        jenkinsfile=jenkinsfile,
-        env_block=env_block,
-risk_stage=risk_stage,
-post_block=post_block,
+        integration=integration,
+        ci_platform=ci_platform,
         slack_webhook=tenant.get("slack_webhook",""),
         thresh_yellow=int(tenant.get("threshold_yellow",40)),
         thresh_red=int(tenant.get("threshold_red",70)),
