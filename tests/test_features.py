@@ -56,25 +56,32 @@ def test_feature_columns_mirrors_features():
 
 # ── Every duplicated copy must match, byte for byte, in order ────────────────
 
-# The Lambda handlers are packaged in isolation (their Dockerfile copies only
-# handler.py) so they keep literal copies. That is allowed — drifting is not.
+# Three places legitimately keep a literal copy, because each is packaged in
+# isolation and cannot import ml/features.py:
+#   - the two Lambda handlers (their Dockerfile copies only handler.py)
+#   - safeship_ci/contract.py (ships to customers as a zipapp / composite action)
+# Copying is allowed. Drifting is not — that is what this test is for.
 _DUPLICATES = [
     ("lambda/retrain/handler.py", "FEATURE_COLUMNS"),
     ("lambda/drift/handler.py", "FEATURE_COLUMNS"),
+    ("safeship_ci/contract.py", "FEATURES"),
 ]
 
 
 @pytest.mark.parametrize("relpath,varname", _DUPLICATES)
 def test_duplicated_feature_lists_have_not_drifted(relpath, varname):
     src = (REPO / relpath).read_text()
-    m = re.search(rf"^{varname}\s*=\s*\[(.*?)\]", src, re.S | re.M)
+    # Accepts a list or a tuple literal — safeship_ci uses a tuple.
+    m = re.search(rf"^{varname}\s*=\s*[\[(](.*?)[\])]", src, re.S | re.M)
     assert m, f"{relpath}: could not find {varname}"
     found = tuple(re.findall(r'"([a-z_]+)"', m.group(1)))
     assert found == FEATURES, (
         f"{relpath} has drifted from ml/features.py.\n"
         f"  contract: {FEATURES}\n"
         f"  {relpath}: {found}\n"
-        "Order is the contract — fix the copy, or change both deliberately."
+        "Order is the contract for anything that builds a positional model input, "
+        "and for the client copy it is what keeps the two files diffable. "
+        "Fix the copy, or change both deliberately."
     )
 
 
@@ -83,17 +90,22 @@ def test_no_new_hardcoded_feature_lists_appear():
     Anything that re-declares the full list is a new copy waiting to drift.
     Only ml/features.py and the two isolated Lambda handlers may do so.
     """
-    allowed = {"ml/features.py", "lambda/retrain/handler.py", "lambda/drift/handler.py",
-               "tests/test_features.py"}
+    # Every entry here must also be pinned by _DUPLICATES above, so an allowed
+    # copy is still not a free copy.
+    allowed = {"ml/features.py"} | {relpath for relpath, _ in _DUPLICATES}
     offenders = []
     for path in REPO.rglob("*.py"):
         rel = path.relative_to(REPO).as_posix()
         if rel in allowed or ".venv" in rel or "ansible/files" in rel:
             continue
+        # Tests legitimately name features when asserting on them.
+        if rel.startswith("tests/"):
+            continue
         text = path.read_text(errors="ignore")
-        # A literal list containing the first and last feature, in that order.
+        # A list *or tuple* literal holding the first and last feature, in order.
         if re.search(r'"diff_size".*?"build_time_delta"', text, re.S):
-            block = re.search(r"\[\s*\"diff_size\".*?\"build_time_delta\",?\s*\]", text, re.S)
+            block = re.search(r"[\[(]\s*\"diff_size\".*?\"build_time_delta\",?\s*[\])]",
+                              text, re.S)
             if block:
                 offenders.append(rel)
     assert not offenders, (

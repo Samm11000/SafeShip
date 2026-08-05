@@ -1,0 +1,7 @@
+{
+  "_comment": "GET {BUILD_URL}testReport/api/json?tree=passCount,failCount,skipCount. Jenkins is the only one of the three platforms with a native test-results API. 47 passed of 50 considered (the 5 skips are excluded, not counted as failures) -> 0.94.",
+  "_class": "hudson.tasks.junit.TestResult",
+  "passCount": 47,
+  "failCount": 3,
+  "skipCount": 5
+}

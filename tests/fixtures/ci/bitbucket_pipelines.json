@@ -1,0 +1,68 @@
+{
+  "_comment": "GET /2.0/repositories/{workspace}/{slug}/pipelines?sort=-created_on&pagelen=11. Note -created_on: sort=-completed_on returns invalid-sort-attribute. Pipeline 42 is in flight. ERROR counts as a failure; STOPPED carries no signal. Times mirror the GitHub and Jenkins fixtures so all three adapters must agree.",
+  "pagelen": 11,
+  "size": 7,
+  "page": 1,
+  "values": [
+    {
+      "uuid": "{aaaaaaaa-0000-0000-0000-000000000042}",
+      "build_number": 42,
+      "state": { "name": "IN_PROGRESS", "type": "pipeline_state" },
+      "created_on": "2026-08-05T11:00:00.000000+00:00"
+    },
+    {
+      "uuid": "{aaaaaaaa-0000-0000-0000-000000000041}",
+      "build_number": 41,
+      "state": { "name": "COMPLETED", "type": "pipeline_state",
+                 "result": { "name": "SUCCESSFUL", "type": "pipeline_state_completed_successful" } },
+      "duration_in_seconds": 300,
+      "created_on": "2026-08-05T10:00:00.000000+00:00",
+      "completed_on": "2026-08-05T10:05:00.000000+00:00"
+    },
+    {
+      "uuid": "{aaaaaaaa-0000-0000-0000-000000000040}",
+      "build_number": 40,
+      "state": { "name": "COMPLETED", "type": "pipeline_state",
+                 "result": { "name": "FAILED", "type": "pipeline_state_completed_failed" } },
+      "duration_in_seconds": 240,
+      "created_on": "2026-08-05T09:00:00.000000+00:00",
+      "completed_on": "2026-08-05T09:04:00.000000+00:00"
+    },
+    {
+      "uuid": "{aaaaaaaa-0000-0000-0000-000000000039}",
+      "build_number": 39,
+      "state": { "name": "COMPLETED", "type": "pipeline_state",
+                 "result": { "name": "SUCCESSFUL", "type": "pipeline_state_completed_successful" } },
+      "duration_in_seconds": 360,
+      "created_on": "2026-08-04T18:00:00.000000+00:00",
+      "completed_on": "2026-08-04T18:06:00.000000+00:00"
+    },
+    {
+      "uuid": "{aaaaaaaa-0000-0000-0000-000000000038}",
+      "build_number": 38,
+      "state": { "name": "COMPLETED", "type": "pipeline_state",
+                 "result": { "name": "STOPPED", "type": "pipeline_state_completed_stopped" } },
+      "duration_in_seconds": 60,
+      "created_on": "2026-08-04T12:00:00.000000+00:00",
+      "completed_on": "2026-08-04T12:01:00.000000+00:00"
+    },
+    {
+      "uuid": "{aaaaaaaa-0000-0000-0000-000000000037}",
+      "build_number": 37,
+      "state": { "name": "COMPLETED", "type": "pipeline_state",
+                 "result": { "name": "ERROR", "type": "pipeline_state_completed_error" } },
+      "duration_in_seconds": 1800,
+      "created_on": "2026-08-03T22:00:00.000000+00:00",
+      "completed_on": "2026-08-03T22:30:00.000000+00:00"
+    },
+    {
+      "uuid": "{aaaaaaaa-0000-0000-0000-000000000036}",
+      "build_number": 36,
+      "state": { "name": "COMPLETED", "type": "pipeline_state",
+                 "result": { "name": "SUCCESSFUL", "type": "pipeline_state_completed_successful" } },
+      "duration_in_seconds": 240,
+      "created_on": "2026-08-03T08:00:00.000000+00:00",
+      "completed_on": "2026-08-03T08:04:00.000000+00:00"
+    }
+  ]
+}

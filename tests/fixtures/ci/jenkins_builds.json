@@ -1,0 +1,13 @@
+{
+  "_comment": "GET {JENKINS_URL}/job/{JOB}/api/json?tree=builds[number,result,duration,timestamp]{0,11}. duration and timestamp are milliseconds. Build 42 is the running build (result null) and must be excluded. UNSTABLE counts as a failure; ABORTED carries no signal. Timestamps mirror github_workflow_runs.json so all three adapters must agree.",
+  "_class": "hudson.model.FreeStyleProject",
+  "builds": [
+    { "_class": "hudson.model.FreeStyleBuild", "number": 42, "result": null,       "duration": 0,       "timestamp": 1785927600000 },
+    { "_class": "hudson.model.FreeStyleBuild", "number": 41, "result": "SUCCESS",  "duration": 300000,  "timestamp": 1785924000000 },
+    { "_class": "hudson.model.FreeStyleBuild", "number": 40, "result": "FAILURE",  "duration": 240000,  "timestamp": 1785920400000 },
+    { "_class": "hudson.model.FreeStyleBuild", "number": 39, "result": "SUCCESS",  "duration": 360000,  "timestamp": 1785866400000 },
+    { "_class": "hudson.model.FreeStyleBuild", "number": 38, "result": "ABORTED",  "duration": 60000,   "timestamp": 1785844800000 },
+    { "_class": "hudson.model.FreeStyleBuild", "number": 37, "result": "UNSTABLE", "duration": 1800000, "timestamp": 1785880800000 },
+    { "_class": "hudson.model.FreeStyleBuild", "number": 36, "result": "SUCCESS",  "duration": 240000,  "timestamp": 1785830400000 }
+  ]
+}

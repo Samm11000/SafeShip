@@ -78,3 +78,10 @@ Thumbs.db
 
 # --- JS (dashboard tooling, if any) ----------------------------------------
 node_modules/
+
+# --- CI test reports -------------------------------------------------------
+# safeship_ci reads test_pass_rate from JUnit XML and tells users to emit it as
+# `pytest --junitxml=reports/junit.xml`, so this directory appears routinely
+# during local testing. It is a build artefact, never source.
+reports/
+safeship_build_id.txt
