@@ -1,0 +1,15 @@
+# Normalise line endings so an edit made on macOS/Linux cannot turn a three-line
+# change into a whole-file diff. Several modules originated on Windows — the
+# C:\deploy-gate paths in their docstrings are the giveaway — and were committed
+# with CRLF.
+* text=auto eol=lf
+
+# Binary: never touch. A byte-level \r\n -> \n replacement inside a pickle
+# deletes a real byte and silently corrupts the model.
+*.pkl  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.zip  binary
+*.woff binary
+*.woff2 binary
