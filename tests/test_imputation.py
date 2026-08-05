@@ -287,6 +287,92 @@ def test_actor_counter_is_atomic_and_per_actor():
     assert dynamo_client.actor_build_count(tid, "frank") == 1
 
 
+# ── The explanation must not invent evidence ─────────────────────────────────
+
+def _reason(body, feature):
+    for r in body["top_reasons"]:
+        if r["feature"] == feature:
+            return r
+    return None
+
+
+def test_an_imputed_top_reason_says_it_was_estimated(client, creds):
+    """
+    top_reasons answers "why this score", and it is ranked by the model's
+    importance — not by whether anyone measured the feature. So an unmeasured
+    feature routinely lands in the top three, and used to be reported as
+
+        Recent failure rate: 40% of last 10 builds failed
+
+    with nothing saying the 40% was a median. That sends the user hunting for
+    evidence that does not exist.
+    """
+    body = _post(client, creds)          # MINIMAL sends no failure rate at all
+    reason = _reason(body, "recent_failure_rate")
+
+    assert reason is not None, "the heaviest feature should be a top reason"
+    assert reason["imputed"] is True
+    assert "estimated" in reason["value_str"], reason["value_str"]
+    assert reason["source"] in ("tenant_median", "training_median")
+
+
+def test_a_measured_top_reason_is_not_marked(client, creds):
+    # The mark has to mean something, which means it must be absent when the
+    # value really was measured.
+    body = _post(client, creds, diff_size=4200, files_changed=61)
+    reason = _reason(body, "diff_size")
+
+    assert reason is not None
+    assert reason["imputed"] is False
+    assert reason["source"] == "provided"
+    assert "estimated" not in reason["value_str"]
+
+
+def test_imputed_reasons_are_ranked_by_importance_not_demoted(client, creds):
+    """
+    Marking is the fix; hiding would be the same dishonesty reversed. If a guess
+    drove the score, the user needs to see that it did.
+    """
+    body = _post(client, creds)
+    importances = [r["importance"] for r in body["top_reasons"]]
+    assert importances == sorted(importances, reverse=True)
+    assert any(r["imputed"] for r in body["top_reasons"]), (
+        "with almost nothing supplied, an imputed feature must still surface"
+    )
+
+
+def test_every_reason_carries_provenance(client, creds):
+    body = _post(client, creds, diff_size=300)
+    for reason in body["top_reasons"]:
+        assert "imputed" in reason
+        assert reason.get("source"), f"{reason['feature']} has no source"
+
+
+def test_the_public_demo_marks_estimates_too(client):
+    """The demo needs no credentials, so it is the most-seen surface of all."""
+    r = client.post("/demo/score", json={"diff_size": 900, "files_changed": 30})
+    assert r.status_code == 200
+    body = r.get_json()
+
+    assert "imputed" in body and body["imputed"], "the demo sends only two features"
+    marked = [x for x in body["top_reasons"] if x["imputed"]]
+    assert marked, "an unmeasured demo feature should be marked"
+    for reason in marked:
+        assert "estimated" in reason["value_str"]
+
+
+def test_score_build_defaults_to_treating_values_as_measured():
+    """
+    Callers that pass no provenance must not have their values silently labelled
+    estimates — the flag defaults to the honest reading of "we were told this".
+    """
+    from scorer import score_build
+
+    result = score_build([100, 5, 14, 2, 0.2, 0.9, 0, 30, 3.0, 0.0])
+    assert all(r["imputed"] is False for r in result["top_reasons"])
+    assert all("estimated" not in r["value_str"] for r in result["top_reasons"])
+
+
 # ── The persisted row must record what was scored ────────────────────────────
 
 def test_persisted_build_records_imputed_values_not_nulls(client, creds):

@@ -173,7 +173,10 @@ def score():
             )
 
     model_input = [values[f] for f in FEATURES]
-    result      = score_build(model_input, features.tenant_id)
+    # imputed/source go in so top_reasons can mark an estimated value as one,
+    # rather than presenting a median as something we measured.
+    result      = score_build(model_input, features.tenant_id,
+                              imputed=imputed, sources=source)
 
     # Tell the caller what was measured and what was guessed. A confident number
     # built mostly on medians should not look identical to a measured one.

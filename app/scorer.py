@@ -206,13 +206,16 @@ _cache = ModelCache()
 # MAIN SCORING FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
 
-def score_build(features_list, tenant_id="base"):
+def score_build(features_list, tenant_id="base", imputed=None, sources=None):
     """
     Takes a list of 10 feature values and returns a score dict.
 
     Args:
         features_list : list of 10 values in FEATURE_COLUMNS order
         tenant_id     : used to load correct model from cache
+        imputed       : names of features that were NOT measured but filled in
+                        from a median. Pass these — see the note below.
+        sources       : per-feature provenance, e.g. {"diff_size": "tenant_median"}
 
     Returns:
         {
@@ -222,10 +225,29 @@ def score_build(features_list, tenant_id="base"):
             "model_phase": "tenant",    # base / tenant
             "top_reasons": [
                 {"feature": "recent_failure_rate", "label": "Recent failure rate",
-                 "importance": 0.278, "value": 0.4, "value_str": "40% of last 10 builds failed"},
+                 "importance": 0.278, "value": 0.4, "imputed": False,
+                 "source": "provided",
+                 "value_str": "40% of last 10 builds failed"},
                 ...
             ]
         }
+
+    WHY imputed MATTERS HERE
+        top_reasons answers "why this score", and an imputed feature can easily
+        be one of the top three — it is ranked by the model's importance, not by
+        whether anyone measured it. Without this, a pipeline that could not
+        compute diff_size still got told
+
+            Diff size (lines changed): 270 lines (large)
+
+        where 270 was the tenant's median and nothing in the sentence said so.
+        That is a fabricated explanation, which is worse than no explanation:
+        the user goes looking for a 270-line diff that does not exist.
+
+        Imputed reasons are still ranked purely by importance and are never
+        demoted or dropped. If a guess drove the score, hiding it would be the
+        same dishonesty in reverse — the user needs to know the verdict rests on
+        an estimate.
     """
     model, phase = _cache.get_model(tenant_id)
 
@@ -251,16 +273,28 @@ def score_build(features_list, tenant_id="base"):
         color   = "red"
 
     # Top 3 risk reasons using feature importances
+    imputed_set = set(imputed or ())
+    sources     = sources or {}
+
     importances = model.feature_importances_
     reasons = []
     for i, (feat, imp) in enumerate(zip(FEATURE_COLUMNS, importances)):
-        val = features_list[i]
+        val         = features_list[i]
+        was_imputed = feat in imputed_set
+        formatted   = _format_value(feat, val)
         reasons.append({
             "feature":   feat,
             "label":     FEATURE_LABELS[feat],
             "importance": round(float(imp), 3),
             "value":     val,
-            "value_str": _format_value(feat, val),
+            # Marked in value_str itself, not only in a sibling flag. value_str is
+            # the string every surface renders — the CLI, the demo page, the Slack
+            # notifier — so a flag alone would leave an estimate still reading as a
+            # measurement anywhere that had not been updated to check it. Being
+            # honest by default beats being honest only where remembered.
+            "value_str": f"{formatted} — estimated" if was_imputed else formatted,
+            "imputed":   was_imputed,
+            "source":    sources.get(feat, "imputed" if was_imputed else "provided"),
         })
 
     # Sort by importance descending, take top 3

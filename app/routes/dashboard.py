@@ -16,6 +16,7 @@ from dynamo_client import (validate_tenant, create_tenant,
                             update_slack_webhook, update_thresholds)
 from scorer    import score_build
 from validator import BuildFeatures
+from features   import FEATURES
 
 S3_DATA   = os.getenv("S3_DATA_BUCKET", "deploy-gate-data")
 AWS_REGION= os.getenv("AWS_REGION",     "ap-south-1")
@@ -97,7 +98,15 @@ def demo_score():
     data["api_key"]   = "demo"
     try:
         features = BuildFeatures(**data)
-        return jsonify(score_build(features.to_model_input(), "demo")), 200
+        # impute_features, not to_model_input: the latter throws away which values
+        # were guessed. The demo is the most public surface there is, so it should
+        # not be the one place that shows a median as though it were measured.
+        values, imputed, source = features.impute_features("demo")
+        result = score_build([values[f] for f in FEATURES], "demo",
+                             imputed=imputed, sources=source)
+        result["imputed"]         = imputed
+        result["feature_sources"] = source
+        return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
