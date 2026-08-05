@@ -21,13 +21,11 @@ DYNAMO_TABLE  = "tenants"
 MIN_BUILDS    = 80
 MIN_PRECISION = 0.75
 MIN_AUC       = 0.70
-FEATURES      = [
-    "diff_size", "files_changed", "hour_of_day", "day_of_week",
-    "recent_failure_rate", "test_pass_rate", "is_hotfix",
-    "deployer_exp", "days_since_deploy", "build_time_delta",
-]
-
-
+# Feature contract: one definition, in ml/features.py.
+_ml_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ml")
+if _ml_dir not in sys.path:
+    sys.path.insert(0, _ml_dir)
+from features import FEATURES   # noqa: E402
 def main():
     run_id = uuid.uuid4().hex[:12]
     set_request_id(run_id)   # correlates every line of this run

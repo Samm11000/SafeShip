@@ -31,7 +31,10 @@ sys.path.insert(0, _project_dir)
 
 from validator        import BuildFeatures, LogRequest, SignupRequest
 from scorer           import score_build
-from dynamo_client    import validate_tenant, increment_build_count, create_tenant
+from dynamo_client    import (validate_tenant, increment_build_count, create_tenant,
+                              actor_build_count, increment_actor_build)
+from imputation       import impute, invalidate as invalidate_medians
+from features         import FEATURES
 from slack_notifier   import send_alert
 
 from observability import get_logger
@@ -116,9 +119,46 @@ def score():
     thresh_yellow = int(tenant.get("threshold_yellow", 40))
     thresh_red    = int(tenant.get("threshold_red",    70))
 
-    # Step 4: Run ML scoring
-    model_input = features.to_model_input()
+    # Step 4: Resolve features, then score.
+    #
+    # deployer_exp is derived server-side from this tenant's own build history —
+    # never taken from the request. A client could otherwise claim
+    # deployer_exp=999 to look like a veteran and lower its own risk score.
+    raw   = features.raw_features()
+    actor = (features.triggered_by or "unknown").strip() or "unknown"
+
+    server_exp = actor_build_count(features.tenant_id, actor)
+    if server_exp > 0:
+        if raw.get("deployer_exp") is not None and int(raw["deployer_exp"]) != server_exp:
+            log.info(
+                "ignoring client-supplied deployer_exp in favour of server history",
+                extra={"tenant_id": features.tenant_id, "actor": actor,
+                       "claimed": raw["deployer_exp"], "actual": server_exp},
+            )
+        raw["deployer_exp"] = server_exp
+        exp_source = "server_history"
+    else:
+        # No history for this actor yet. A client hint is better than nothing on
+        # someone's very first build; imputation covers it when absent.
+        exp_source = "client_hint" if raw.get("deployer_exp") is not None else "imputed"
+
+    values, imputed, source = impute(raw, features.tenant_id)
+    if exp_source != "imputed":
+        source["deployer_exp"] = exp_source
+        if "deployer_exp" in imputed:
+            imputed.remove("deployer_exp")
+
+    model_input = [values[f] for f in FEATURES]
     result      = score_build(model_input, features.tenant_id)
+
+    # Tell the caller what was measured and what was guessed. A confident number
+    # built mostly on medians should not look identical to a measured one.
+    result["imputed"]         = imputed
+    result["feature_sources"] = source
+    if imputed:
+        log.info("scored with imputed features",
+                 extra={"tenant_id": features.tenant_id, "imputed": imputed,
+                        "n_imputed": len(imputed)})
 
     # Step 5: Apply tenant's custom thresholds to verdict
     score_val = result["score"]
@@ -147,14 +187,22 @@ def score():
     # Step 8: Log to S3 asynchronously (non-blocking)
     try:
         row = features.to_log_dict()
+        # Persist the values the model actually scored, including imputed ones —
+        # otherwise retraining learns from rows full of nulls.
+        row.update(values)
         row.update({
             "build_id":        build_id,
             "timestamp":       int(datetime.now(timezone.utc).timestamp()),
             "predicted_score": score_val,
+            "imputed":         imputed,
+            "actor":           actor,
         })
         _write_build(features.tenant_id, row)
         # build_count lives in DynamoDB (atomic counter) — no need to count S3 objects
         result["total_builds"] = increment_build_count(features.tenant_id)
+        increment_actor_build(features.tenant_id, actor)
+        # New history invalidates the cached medians for this tenant.
+        invalidate_medians(features.tenant_id)
     except Exception as e:
         log.error("S3 build write failed (non-fatal)", extra={"err": str(e)})
 

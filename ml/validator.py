@@ -15,6 +15,16 @@ HOW TO TEST:
 from pydantic import BaseModel, Field, validator
 from typing import Optional
 
+import os as _os
+import sys as _sys
+
+_here = _os.path.dirname(_os.path.abspath(__file__))
+for _p in (_here, _os.path.join(_os.path.dirname(_here), "app")):
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+
+from features import FEATURES
+
 
 class BuildFeatures(BaseModel):
     """
@@ -26,18 +36,28 @@ class BuildFeatures(BaseModel):
     # Required — no defaults
     tenant_id:   str
     api_key:     str
-    hour_of_day: int = Field(..., ge=0,   le=23)
-    day_of_week: int = Field(..., ge=0,   le=6)
 
-    # Optional with safe defaults (fallback values from feature_extractor.py)
-    diff_size:            int   = Field(default=100,  ge=0,   le=50000)
-    files_changed:        int   = Field(default=5,    ge=0,   le=1000)
-    recent_failure_rate:  float = Field(default=0.0,  ge=0.0, le=1.0)
-    test_pass_rate:       float = Field(default=1.0,  ge=0.0, le=1.0)
-    is_hotfix:            int   = Field(default=0,    ge=0,   le=1)
-    deployer_exp:         int   = Field(default=1,    ge=1)
-    days_since_deploy:    float = Field(default=7.0,  ge=0.0)
-    build_time_delta:     float = Field(default=0.0)
+    # ── Features ──────────────────────────────────────────────────────────────
+    # All None-able ON PURPOSE. None means "I could not measure this", which is
+    # NOT the same as a safe value: app/imputation.py fills it from the tenant's
+    # own median (or the training median) and the response reports what it
+    # guessed.
+    #
+    # These used to default to recent_failure_rate=0.0 and test_pass_rate=1.0 —
+    # i.e. an unmeasured build was scored as a flawless one. Those two features
+    # carry 52.8% of the model's weight, and the training data's medians are
+    # 0.261 and 0.819, so the old defaults sat far outside anything the model was
+    # trained on. That is why partial integrations always came back SAFE.
+    hour_of_day:          Optional[int]   = Field(default=None, ge=0,   le=23)
+    day_of_week:          Optional[int]   = Field(default=None, ge=0,   le=6)
+    diff_size:            Optional[int]   = Field(default=None, ge=0,   le=50000)
+    files_changed:        Optional[int]   = Field(default=None, ge=0,   le=1000)
+    recent_failure_rate:  Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    test_pass_rate:       Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    is_hotfix:            Optional[int]   = Field(default=None, ge=0,   le=1)
+    deployer_exp:         Optional[int]   = Field(default=None, ge=0)
+    days_since_deploy:    Optional[float] = Field(default=None, ge=0.0)
+    build_time_delta:     Optional[float] = Field(default=None)
 
     # Metadata (not fed to model, used for logging)
     job_name:     Optional[str] = Field(default="unknown")
@@ -58,34 +78,43 @@ class BuildFeatures(BaseModel):
 
     @validator("diff_size", pre=True)
     def diff_size_not_nan(cls, v):
-        if v is None:
-            return 100
+        """
+        NaN/inf/garbage becomes None (unknown) rather than a made-up 100, so it
+        goes through imputation like any other missing value.
+        """
+        if v is None or v == "":
+            return None
         try:
             val = float(v)
             import math
             if math.isnan(val) or math.isinf(val):
-                return 100
+                return None
             return max(0, int(val))
         except (TypeError, ValueError):
-            return 100
+            return None
 
-    def to_model_input(self) -> list:
+    def raw_features(self) -> dict:
+        """Feature values as supplied, with None where unmeasured."""
+        return {f: getattr(self, f) for f in FEATURES}
+
+    def to_model_input(self, tenant_id: Optional[str] = None) -> list:
         """
-        Returns features as a list in the EXACT order the model expects.
-        This order must match the column order used during training.
+        Model-ready values in FEATURES order, with any None imputed.
+
+        The order comes from ml/features.py rather than being hand-listed here —
+        this method used to be an eighth independent copy of the ordering, and
+        every copy is a chance for the contract to drift silently.
+
+        Use `impute_features()` instead when you need to know what was guessed.
         """
-        return [
-            self.diff_size,
-            self.files_changed,
-            self.hour_of_day,
-            self.day_of_week,
-            self.recent_failure_rate,
-            self.test_pass_rate,
-            self.is_hotfix,
-            self.deployer_exp,
-            self.days_since_deploy,
-            self.build_time_delta,
-        ]
+        values, _imputed, _source = self.impute_features(tenant_id)
+        return [values[f] for f in FEATURES]
+
+    def impute_features(self, tenant_id: Optional[str] = None):
+        """Returns (values, imputed_feature_names, source_per_feature)."""
+        from imputation import impute
+
+        return impute(self.raw_features(), tenant_id or self.tenant_id)
 
     def to_log_dict(self) -> dict:
         """Returns a flat dict for saving to S3 CSV."""

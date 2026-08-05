@@ -38,6 +38,13 @@ def create_tenant(email=""):
         "drift_alert_sent": False,
         "threshold_red":    70,
         "threshold_yellow": 40,
+        # actor -> number of builds they have triggered. Backs deployer_exp so it
+        # is derived from history rather than trusted from the request.
+        "actor_builds":     {},
+        # Set by the onboarding wizard; "" until the user picks a platform.
+        "ci_platform":      "",
+        "onboarding_step":  0,
+        "first_build_at":   "",
     }
     _table().put_item(Item=item)
     log.info("tenant created", extra={"tenant_id": tenant_id})
@@ -144,3 +151,70 @@ def update_model_metadata(tenant_id, phase, precision):
             })
     except Exception as e:
         log.error("model metadata update failed", extra={"err": str(e)})
+
+
+def actor_build_count(tenant_id, actor):
+    """
+    How many builds this actor has previously triggered for this tenant.
+
+    Backs deployer_exp. O(1) — a map on the tenant record, not a scan of build
+    history. Returns 0 for an unknown actor, which callers treat as "no history"
+    rather than "inexperienced".
+    """
+    if not tenant_id or not actor or tenant_id == "demo":
+        return 0
+    try:
+        item = get_tenant(tenant_id) or {}
+        counts = item.get("actor_builds") or {}
+        return int(counts.get(actor, 0))
+    except Exception as e:
+        log.error("actor_build_count failed",
+                  extra={"tenant_id": tenant_id, "err": str(e)})
+        return 0
+
+
+def increment_actor_build(tenant_id, actor):
+    """
+    Atomically bump this actor's build count.
+
+    Uses a nested ADD on a map attribute, so two concurrent builds by the same
+    actor cannot lose an increment (a read-modify-write would).
+    """
+    if not tenant_id or not actor or tenant_id == "demo":
+        return 0
+    try:
+        # The map itself must exist before a nested path can be updated.
+        _table().update_item(
+            Key={"tenant_id": tenant_id},
+            UpdateExpression="SET actor_builds = if_not_exists(actor_builds, :empty)",
+            ExpressionAttributeValues={":empty": {}},
+        )
+        resp = _table().update_item(
+            Key={"tenant_id": tenant_id},
+            UpdateExpression="ADD actor_builds.#a :one",
+            ExpressionAttributeNames={"#a": actor},
+            ExpressionAttributeValues={":one": 1},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(resp.get("Attributes", {}).get("actor_builds", {}).get(actor, 0))
+    except Exception as e:
+        log.error("increment_actor_build failed",
+                  extra={"tenant_id": tenant_id, "err": str(e)})
+        return 0
+
+
+def set_ci_platform(tenant_id, platform):
+    """Records the CI platform chosen during onboarding."""
+    try:
+        _table().update_item(
+            Key={"tenant_id": tenant_id},
+            UpdateExpression="SET ci_platform = :p, onboarding_step = :s",
+            ExpressionAttributeValues={":p": platform, ":s": 1},
+        )
+        log.info("ci platform selected",
+                 extra={"tenant_id": tenant_id, "ci_platform": platform})
+        return True
+    except Exception as e:
+        log.error("set_ci_platform failed",
+                  extra={"tenant_id": tenant_id, "err": str(e)})
+        return False

@@ -14,6 +14,7 @@ HOW TO TEST:
 
 
 import os
+import sys
 import time
 import joblib
 import boto3
@@ -31,19 +32,19 @@ S3_BUCKET       = os.getenv("S3_MODELS_BUCKET", "deploy-gate-models")
 AWS_REGION      = os.getenv("AWS_REGION",        "ap-south-1")
 CACHE_TTL_SECS  = 300   # reload model from S3 every 5 minutes
 
-# Must match exact order from validator.py to_model_input() and train_base_model.py
-FEATURE_COLUMNS = [
-    "diff_size",
-    "files_changed",
-    "hour_of_day",
-    "day_of_week",
-    "recent_failure_rate",
-    "test_pass_rate",
-    "is_hotfix",
-    "deployer_exp",
-    "days_since_deploy",
-    "build_time_delta",
-]
+# The feature contract lives in ml/features.py — one definition, imported here
+# rather than restated. It used to be duplicated in seven files, with column
+# order as the only thing keeping training and inference aligned.
+_ml_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ml")
+if _ml_dir not in sys.path:
+    sys.path.insert(0, _ml_dir)
+
+from features import (            # noqa: E402
+    FEATURES,
+    FEATURE_COLUMNS,
+    to_frame,
+    validate_model,
+)
 
 # Human-readable explanation for each feature (shown in Slack alert)
 FEATURE_LABELS = {
@@ -170,6 +171,18 @@ class ModelCache:
             phase = "base"
             log.info("loaded base model", extra={"s3_key": base_key, "phase": "base"})
 
+        # Fail fast on a stale or mis-ordered artefact. Cheap: this runs on a
+        # cache miss (every CACHE_TTL_SECS), never on a warm request.
+        ok, detail = validate_model(model, strict=False)
+        if not ok:
+            log.error(
+                "loaded model violates the feature contract; refusing to serve it",
+                extra={"tenant_id": tenant_id, "phase": phase, "detail": detail},
+            )
+            raise RuntimeError(f"model/feature contract mismatch: {detail}")
+        if detail != "ok":
+            log.warning("model feature check", extra={"tenant_id": tenant_id, "detail": detail})
+
         self._models[cache_key]     = model
         self._timestamps[cache_key] = now
         self._phase = {tenant_id: phase}
@@ -216,8 +229,10 @@ def score_build(features_list, tenant_id="base"):
     """
     model, phase = _cache.get_model(tenant_id)
 
-    # Build input array — shape (1, 10)
-    X = np.array(features_list).reshape(1, -1)
+    # A NAMED DataFrame, not a bare array. With an array, scikit-learn only
+    # checks the column count and trusts position — so a reordered feature list
+    # would silently mispredict. With names it raises instead.
+    X = to_frame(features_list)
 
     # predict_proba returns [[P(safe), P(risky)]]
     proba       = model.predict_proba(X)[0]

@@ -30,13 +30,8 @@ import sys
 AWS_REGION = "ap-south-1"
 S3_DATA    = "deploy-gate-data"
 
-FEATURE_COLUMNS = [
-    "diff_size", "files_changed", "hour_of_day", "day_of_week",
-    "recent_failure_rate", "test_pass_rate", "is_hotfix",
-    "deployer_exp", "days_since_deploy", "build_time_delta",
-]
-
-
+# Feature contract: one definition, in ml/features.py.
+from features import FEATURES, FEATURE_COLUMNS   # noqa: E402
 def generate_realistic_builds(n=100):
     """
     Generates n realistic build rows that simulate a real team.

@@ -21,6 +21,16 @@ AWS_REGION = os.getenv("AWS_DEFAULT_REGION", os.getenv("AWS_EXECUTION_ENV", "us-
 S3_DATA      = os.getenv("S3_DATA_BUCKET",    "deploy-gate-data")
 DYNAMO_TABLE = os.getenv("DYNAMO_TABLE",      "tenants")
 
+# ---------------------------------------------------------------------------
+# DUPLICATE OF ml/features.py::FEATURES — INTENTIONAL, DO NOT 'TIDY' AWAY.
+#
+# This handler is packaged in isolation (its Dockerfile copies only
+# handler.py), so it cannot import the shared contract. Order is the
+# contract: reordering silently mistrains/misreads every model.
+#
+# PINNED BY tests/test_features.py, which fails if this drifts from
+# ml/features.py. If you change one, change both.
+# ---------------------------------------------------------------------------
 FEATURE_COLUMNS = [
     "diff_size", "files_changed", "hour_of_day", "day_of_week",
     "recent_failure_rate", "test_pass_rate", "is_hotfix",

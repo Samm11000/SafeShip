@@ -38,13 +38,8 @@ DATA_PATH    = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data", "synthetic_builds.csv"
 )
 
-FEATURE_COLUMNS = [
-    "diff_size", "files_changed", "hour_of_day", "day_of_week",
-    "recent_failure_rate", "test_pass_rate", "is_hotfix",
-    "deployer_exp", "days_since_deploy", "build_time_delta",
-]
-
-
+# Feature contract: one definition, in ml/features.py.
+from features import FEATURES, FEATURE_COLUMNS   # noqa: E402
 # ─────────────────────────────────────────────────────────────────────────────
 # LOAD MODEL FROM S3
 # ─────────────────────────────────────────────────────────────────────────────
