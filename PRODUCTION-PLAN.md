@@ -80,6 +80,26 @@ Docker builds on **3.11**, your venv is **3.9.6** (upstream security support
 ended October 2025). Dev/prod skew on a language runtime is how "works on my
 machine" happens. Add `.python-version`, match Docker, drop 3.9.
 
+**A concrete blocker to clear first.** 28 `.py` files carry a stale header line:
+
+```
+Path: C:\deploy-gate\app\routes\score.py
+```
+
+`\d` is an invalid escape sequence. Today that is a `DeprecationWarning`; on
+**3.12 it becomes a `SyntaxWarning`, and it is slated to become a `SyntaxError`**.
+So the upgrade trips over 28 files at once — and the warnings are currently
+invisible because `.pyc` caching only emits them when a file is recompiled. The
+paths are also simply wrong; this is not a Windows repo.
+
+`app/`, `ml/`, and their vendored copies under `ansible/files/` are all affected.
+The fix is deleting the lines — mechanical and docstring-only — but it should land
+as its own commit so the diff stays reviewable.
+
+```bash
+grep -rln 'Path: C:\\' --include='*.py' .
+```
+
 ---
 
 ## Phase 1 — Make it operable — ✅ DONE
@@ -168,19 +188,31 @@ recall, AUC, the data window, and who/what triggered it. Today
 `base_metadata.json` is a single mutable file — you cannot answer "why did
 scoring change last Tuesday?"
 
-### 2.3 Fix the train/predict feature skew
+### 2.3 Fix the train/predict feature skew — ✅ DONE
 
-Every score logs:
+Training passed a named DataFrame; prediction passed a bare array, so **column
+order was the only thing keeping them aligned**, and reordering one feature would
+have produced confidently wrong predictions with no error.
 
-> `X does not have valid feature names, but RandomForestClassifier was fitted with feature names`
+`ml/features.py` is now the single `FEATURES` contract, prediction builds a named
+DataFrame via `to_frame()`, and `tests/test_features.py` fails if any copy drifts —
+including the deliberately isolated ones in the Lambda handlers and
+`safeship_ci/contract.py`.
 
-Training passes a named DataFrame; prediction passes a bare array. **Column order
-is the only thing keeping them aligned.** Reorder one feature in
-`feature_extractor.py` and you get confidently wrong predictions with no error.
+Investigating this surfaced a far larger version of the same problem, which the
+work after it addressed: neither reference integration actually *collected* the
+features. `recent_failure_rate` and `test_pass_rate` — 52.8% of the model's weight
+— were sent as `0.0` and `1.0`, the most reassuring value in each range. The
+alignment was fine; the inputs were fiction. See `safeship_ci/` and
+`app/imputation.py`.
 
-Fix: one shared `FEATURES` list, and build the predict input as a DataFrame with
-those columns. Add a test asserting order equality — this is a silent-corruption
-class of bug and deserves a guard.
+Still open in the same family:
+
+- `lambda/drift/handler.py` should build its input through `to_frame()` rather
+  than its own array.
+- Adoption itself causes drift: a tenant whose pipeline starts reporting a real
+  `test_pass_rate` after weeks of imputed medians changes distribution under the
+  model. That belongs to 2.5.
 
 ### 2.4 Shadow mode before enforcing
 
