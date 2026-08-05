@@ -84,11 +84,15 @@ def load_data():
     if len(df) < before:
         print(f"[train] Dropped {before - len(df)} rows with pending labels")
 
-    # Check for nulls
+    # Check for nulls. Fill from the column's own median, never from zero: for
+    # six of the ten features zero is a legitimate value, and for the two
+    # heaviest (recent_failure_rate, test_pass_rate) zero is the most extreme
+    # value in one direction. Zero-filling teaches the model that "unknown"
+    # looks like "never fails" / "everything failed".
     nulls = df[FEATURE_COLUMNS].isnull().sum()
     if nulls.sum() > 0:
-        print(f"[train] WARNING: Found nulls, filling with defaults:\n{nulls[nulls > 0]}")
-        df[FEATURE_COLUMNS] = df[FEATURE_COLUMNS].fillna(0)
+        print(f"[train] WARNING: Found nulls, filling from column medians:\n{nulls[nulls > 0]}")
+        df[FEATURE_COLUMNS] = df[FEATURE_COLUMNS].fillna(df[FEATURE_COLUMNS].median())
 
     X = df[FEATURE_COLUMNS]
     y = df["label"]

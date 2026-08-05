@@ -5,10 +5,10 @@ Path: C:\deploy-gate\lambda\retrain\handler.py
 PURPOSE:
   Nightly Lambda function triggered at 2am UTC by CloudWatch Events.
   Scans all tenants in DynamoDB.
-  For each tenant with 80+ labelled builds:
-    1. Pulls their data.csv from S3
-    2. Retrains Random Forest
-    3. Runs 5-check validation gate
+  For each tenant with MIN_BUILDS (200) or more labelled builds:
+    1. Pulls their labelled builds from S3
+    2. Retrains Random Forest on a time-ordered split
+    3. Runs the validation gate (see validate_model)
     4. If passes: hot-swaps model.pkl in S3
     5. Updates DynamoDB metadata
     6. Sends Slack alert if retrain fails
@@ -42,10 +42,32 @@ AWS_REGION = os.getenv("AWS_DEFAULT_REGION", os.getenv("AWS_EXECUTION_ENV", "us-
 S3_MODELS       = os.getenv("S3_MODELS_BUCKET",  "deploy-gate-models")
 S3_DATA         = os.getenv("S3_DATA_BUCKET",     "deploy-gate-data")
 DYNAMO_TABLE    = os.getenv("DYNAMO_TABLE",       "tenants")
-MIN_BUILDS      = 5      # minimum labelled builds before retraining
 MIN_PRECISION   = 0.75    # minimum precision to swap model
 MIN_AUC         = 0.70    # minimum AUC-ROC to swap model
 MIN_RISKY_RATIO = 0.05    # minimum risky build ratio in test set
+
+# A promotion decision is only as trustworthy as the set it was measured on.
+# At the old MIN_BUILDS of 5, a 20% split left a ONE-ROW test set, on which
+# `precision >= 0.75` evaluates to 0.0 or 1.0 — a coin flip deciding whether a
+# model is hot-swapped into production for a paying tenant. Below these floors
+# the right answer is to skip, not to promote.
+#
+# The three constants are mutually constrained, and getting them wrong is silent:
+#
+#   MIN_BUILDS * 0.20 >= MIN_TEST_ROWS
+#       otherwise a tenant clears the data gate and then fails the test-set gate
+#       forever, and no model is ever promoted.
+#   MIN_TEST_RISKY / MIN_TEST_ROWS  <= a plausible deploy-failure rate
+#       requiring 8 failures in 30 held-out builds demands a 27% failure rate;
+#       real teams run nearer 5-15%, so that floor would also never be met.
+#
+# 200 / 40 / 5 implies a 12.5% failure rate in the recent window. A team with a
+# materially lower failure rate does not get a tenant model — which is the right
+# outcome, not a limitation: there is little there to learn from, and the prior
+# already covers it. tests/test_retrain.py asserts these stay consistent.
+MIN_BUILDS      = 200     # minimum labelled builds before retraining
+MIN_TEST_ROWS   = 40      # rows required in the held-out set
+MIN_TEST_RISKY  = 5       # minority-class rows required in the held-out set
 
 # ---------------------------------------------------------------------------
 # DUPLICATE OF ml/features.py::FEATURES — INTENTIONAL, DO NOT 'TIDY' AWAY.
@@ -62,6 +84,55 @@ FEATURE_COLUMNS = [
     "recent_failure_rate", "test_pass_rate", "is_hotfix",
     "deployer_exp", "days_since_deploy", "build_time_delta",
 ]
+
+# ---------------------------------------------------------------------------
+# DUPLICATE OF app/imputation.py::TRAINING_MEDIANS — INTENTIONAL, same reason
+# as FEATURE_COLUMNS above. Pinned by tests/test_imputation.py.
+#
+# These exist so training imputes missing values the SAME WAY serving does.
+# The handler previously used .fillna(0), which is not a neutral choice: a
+# missing test_pass_rate became 0.0, i.e. "every test failed", and a missing
+# recent_failure_rate became 0.0, i.e. "never fails". Training on those while
+# /score imputes medians is train/serve skew — the model learns one
+# distribution and is asked to judge another.
+# ---------------------------------------------------------------------------
+TRAINING_MEDIANS = {
+    "diff_size": 105.0,
+    "files_changed": 4.0,
+    "hour_of_day": 13.0,
+    "day_of_week": 3.0,
+    "recent_failure_rate": 0.261,
+    "test_pass_rate": 0.819,
+    "is_hotfix": 0.0,
+    "deployer_exp": 27.0,
+    "days_since_deploy": 2.7,
+    "build_time_delta": 0.011,
+}
+
+_INT_FEATURES = {"diff_size", "files_changed", "hour_of_day", "day_of_week",
+                 "is_hotfix", "deployer_exp"}
+
+
+def impute_frame(df):
+    """
+    Fill missing features the way /score does: this tenant's own median for the
+    column, falling back to the training-set median when the tenant has none.
+
+    Never zero-fill. For six of the ten features zero is a legitimate value, and
+    for the two heaviest ones it is the most reassuring value possible.
+    """
+    out = df.reindex(columns=FEATURE_COLUMNS).copy()
+    for col in FEATURE_COLUMNS:
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+        if not out[col].isnull().any():
+            continue
+        median = out[col].median()          # NaN when the column is entirely empty
+        if pd.isna(median):
+            median = TRAINING_MEDIANS[col]
+        if col in _INT_FEATURES:
+            median = int(round(float(median)))
+        out[col] = out[col].fillna(median)
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -149,22 +220,34 @@ def load_tenant_data(s3, tenant_id):
 # STEP 3 — Train model
 # ─────────────────────────────────────────────────────────────────────────────
 def train_model(df):
-    X = df[FEATURE_COLUMNS].fillna(0)
-    y = df["label"].astype(int)
+    """
+    Fit on the tenant's history, holding out the MOST RECENT builds.
 
-    # Use sample weights if available
-    weights = df["sample_weight"].astype(float) if "sample_weight" in df.columns else None
+    The split is by time, not random. A random split lets the model train on
+    builds that happened *after* the ones it is tested on, which is a plain leak:
+    in production the model only ever has the past. A random split therefore
+    reports a score the deployed model can never actually achieve, and the
+    promotion gate then trusts that score.
+    """
+    df = df.copy()
+    if "timestamp" in df.columns:
+        df["_ts"] = pd.to_numeric(df["timestamp"], errors="coerce").fillna(0)
+        df = df.sort_values("_ts", kind="mergesort")   # stable: ties keep arrival order
 
-    # Train/test split — stratified to keep class ratio
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, random_state=42, stratify=y
-    )
+    X = impute_frame(df).reset_index(drop=True)
+    y = df["label"].astype(int).reset_index(drop=True)
+    weights = (pd.to_numeric(df["sample_weight"], errors="coerce").fillna(1.0)
+               .reset_index(drop=True) if "sample_weight" in df.columns else None)
 
-    # Keep test weights separate if available
-    if weights is not None:
-        w_train = weights.iloc[X_train.index] if hasattr(weights, 'iloc') else None
-    else:
-        w_train = None
+    # Tail split. Deliberately NOT stratified — stratifying would mean choosing
+    # the test set by its labels, which is the leak again in another costume. If
+    # the recent window happens to hold too few failures to judge on,
+    # validate_model's floors skip the promotion instead of guessing.
+    n_test  = max(1, int(round(len(X) * 0.20)))
+    cut     = max(1, len(X) - n_test)
+    X_train, X_test = X.iloc[:cut], X.iloc[cut:]
+    y_train, y_test = y.iloc[:cut], y.iloc[cut:]
+    w_train = weights.iloc[:cut] if weights is not None else None
 
     # Apply SMOTE only if we have enough minority class samples
     risky_count = (y_train == 1).sum()
@@ -203,14 +286,23 @@ def validate_model(new_model, old_model, X_test, y_test, dataset_size):
     auc          = roc_auc_score(y_test, y_proba) if len(set(y_test)) > 1 else 0.5
     risky_ratio  = float(y_test.mean())
 
+    # Check names are built from the constants so they cannot drift from what is
+    # actually enforced. The previous literal "dataset_size >= 80" was printed
+    # and logged while the code compared against MIN_BUILDS = 5.
+    n_test       = int(len(y_test))
+    n_test_risky = int((y_test == 1).sum())
+
     checks = {
-        "dataset_size >= 80":       dataset_size >= MIN_BUILDS,
-        "precision >= 0.75":        precision    >= MIN_PRECISION,
-        "auc_roc >= 0.70":          auc          >= MIN_AUC,
-        "risky_ratio >= 0.05":      risky_ratio  >= MIN_RISKY_RATIO,
+        f"dataset_size >= {MIN_BUILDS}":   dataset_size >= MIN_BUILDS,
+        f"test_rows >= {MIN_TEST_ROWS}":   n_test       >= MIN_TEST_ROWS,
+        f"test_risky >= {MIN_TEST_RISKY}": n_test_risky >= MIN_TEST_RISKY,
+        f"precision >= {MIN_PRECISION}":   precision    >= MIN_PRECISION,
+        f"auc_roc >= {MIN_AUC}":           auc          >= MIN_AUC,
+        f"risky_ratio >= {MIN_RISKY_RATIO}": risky_ratio >= MIN_RISKY_RATIO,
     }
 
-    # Check 5: new model not worse than old
+    # Final check: the candidate must not be worse than the incumbent, measured
+    # on the same held-out window.
     if old_model is not None:
         try:
             old_pred      = old_model.predict(X_test)
@@ -229,6 +321,11 @@ def validate_model(new_model, old_model, X_test, y_test, dataset_size):
         "recall":      round(float(recall),    4),
         "auc_roc":     round(float(auc),       4),
         "dataset_size": dataset_size,
+        # Recorded so a promotion can be audited later: a precision of 1.0 means
+        # something very different on 30 rows than on 3.
+        "test_rows":       n_test,
+        "test_risky_rows": n_test_risky,
+        "split":           "time-ordered tail",
         "checks":      checks,
         "passed":      all_pass,
     }
