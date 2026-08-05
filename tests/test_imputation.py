@@ -215,8 +215,63 @@ def test_spoofed_deployer_exp_is_ignored_once_history_exists(client, creds):
 
 
 def test_client_hint_is_accepted_only_for_a_brand_new_actor(client, creds):
-    body = _post(client, creds, triggered_by="brand-new-person", deployer_exp=12)
+    """
+    A hint is consulted only when the server has no history for that actor, and
+    then only up to the value it would have imputed anyway (see the cap below).
+
+    The accepted value is read from the live baseline rather than hardcoded: the
+    cap moves with the tenant's own history, so a literal here would pass alone
+    and fail once other tests have added builds.
+    """
+    from imputation import impute
+
+    baseline = impute({"deployer_exp": None},
+                      tenant_id=creds["tenant_id"])[0]["deployer_exp"]
+    body = _post(client, creds, triggered_by="brand-new-person",
+                 deployer_exp=int(baseline))
     assert body["feature_sources"]["deployer_exp"] == "client_hint"
+
+
+def test_an_optimistic_hint_from_an_unknown_actor_is_capped(client, creds):
+    """
+    The door that server-side derivation alone leaves open: deriving from history
+    only binds an actor we have *seen*. A caller sending a fresh `triggered_by` on
+    every build is permanently new — and so would be permanently trusted, if the
+    hint were taken at face value.
+    """
+    body = _post(client, creds, triggered_by="rotating-name-1", deployer_exp=999)
+
+    assert body["feature_sources"]["deployer_exp"] != "client_hint"
+    assert "deployer_exp" in body["imputed"], (
+        "a capped hint must still be reported as imputed — that is what happened"
+    )
+
+
+def test_a_self_penalising_hint_is_believed(client, creds):
+    """
+    The asymmetry that makes the cap safe rather than merely restrictive: admitting
+    inexperience costs the caller something, so there is no reason to lie about it.
+    Only the flattering direction is untrustworthy.
+    """
+    body = _post(client, creds, triggered_by="honest-rookie", deployer_exp=1)
+    assert body["feature_sources"]["deployer_exp"] == "client_hint"
+    assert "deployer_exp" not in body["imputed"]
+
+
+def test_no_claimed_deployer_exp_can_lower_the_score(client, creds):
+    """
+    The invariant, stated directly: whatever a client claims, under whatever name,
+    it cannot buy a better verdict than saying nothing at all.
+    """
+    baseline = _post(client, creds, triggered_by="quiet-newcomer")
+
+    for claimed in (30, 100, 999, 10 ** 6):
+        body = _post(client, creds, triggered_by=f"claimer-{claimed}",
+                     deployer_exp=claimed)
+        assert body["score"] >= baseline["score"] - 1, (
+            f"a fresh actor claiming deployer_exp={claimed} lowered the score "
+            f"({baseline['score']} -> {body['score']})"
+        )
 
 
 def test_actor_counter_is_atomic_and_per_actor():

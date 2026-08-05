@@ -128,25 +128,49 @@ def score():
     actor = (features.triggered_by or "unknown").strip() or "unknown"
 
     server_exp = actor_build_count(features.tenant_id, actor)
+    hint       = raw.get("deployer_exp")
+
     if server_exp > 0:
-        if raw.get("deployer_exp") is not None and int(raw["deployer_exp"]) != server_exp:
+        if hint is not None and int(hint) != server_exp:
             log.info(
                 "ignoring client-supplied deployer_exp in favour of server history",
                 extra={"tenant_id": features.tenant_id, "actor": actor,
-                       "claimed": raw["deployer_exp"], "actual": server_exp},
+                       "claimed": hint, "actual": server_exp},
             )
         raw["deployer_exp"] = server_exp
         exp_source = "server_history"
     else:
-        # No history for this actor yet. A client hint is better than nothing on
-        # someone's very first build; imputation covers it when absent.
-        exp_source = "client_hint" if raw.get("deployer_exp") is not None else "imputed"
+        # No history for this actor yet, so there is nothing to check the claim
+        # against. Impute a baseline first and bound the hint by it: a hint is
+        # only credible when it works AGAINST the caller. Claiming inexperience
+        # is self-penalising and therefore believable; claiming to be a veteran
+        # is unverifiable and is precisely the spoof. Accepting an arbitrary
+        # number here would reopen it — a caller need only rotate triggered_by
+        # on every build to be permanently "new", and permanently a veteran.
+        raw["deployer_exp"] = None
+        exp_source = None
 
     values, imputed, source = impute(raw, features.tenant_id)
-    if exp_source != "imputed":
+
+    if exp_source == "server_history":
         source["deployer_exp"] = exp_source
         if "deployer_exp" in imputed:
             imputed.remove("deployer_exp")
+    elif hint is not None:
+        baseline = values["deployer_exp"]
+        if int(hint) <= baseline:
+            values["deployer_exp"] = int(hint)
+            source["deployer_exp"] = "client_hint"
+            if "deployer_exp" in imputed:
+                imputed.remove("deployer_exp")
+        else:
+            # Keep the imputed value, and leave it reported as imputed — that is
+            # what actually happened.
+            log.info(
+                "capping optimistic deployer_exp hint from an unknown actor",
+                extra={"tenant_id": features.tenant_id, "actor": actor,
+                       "claimed": int(hint), "capped_at": baseline},
+            )
 
     model_input = [values[f] for f in FEATURES]
     result      = score_build(model_input, features.tenant_id)
