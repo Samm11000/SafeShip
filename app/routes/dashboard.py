@@ -19,6 +19,7 @@ from validator import BuildFeatures
 from features   import FEATURES
 import integrations
 from integrations import public_base_url
+from redirects   import login_url, safe_next
 
 S3_DATA   = os.getenv("S3_DATA_BUCKET", "deploy-gate-data")
 AWS_REGION= os.getenv("AWS_REGION",     "ap-south-1")
@@ -122,16 +123,19 @@ def demo_score():
 
 @dashboard_bp.route("/signup", methods=["GET"])
 def signup_page():
-    # If already logged in, go to dashboard
+    # If already logged in, go wherever they were headed.
     if session.get("tenant_id"):
-        return redirect("/dashboard")
+        return redirect(safe_next(request.args.get("next")))
     return render_template("signup.html", error="")
 
 @dashboard_bp.route("/login", methods=["GET"])
 def login_page():
+    target = safe_next(request.args.get("next"))
     if session.get("tenant_id"):
-        return redirect("/dashboard")
-    return render_template("login.html", error="")
+        return redirect(target)
+    # Passed to the template so the form can send it back on submit. Already
+    # validated here, so the page never renders an attacker-controlled URL.
+    return render_template("login.html", error="", next=target)
 
 @dashboard_bp.route("/login", methods=["POST"])
 def login():
@@ -168,7 +172,10 @@ def login():
     return jsonify({
         "success":   True,
         "tenant_id": tenant_id,
-        "redirect":  "/dashboard"
+        # Back to whatever they were trying to reach. Validated as an internal
+        # path, because a login page that redirects wherever it is told is a
+        # ready-made phishing flow — see app/redirects.py.
+        "redirect":  safe_next(data.get("next")),
     }), 200
 
 @dashboard_bp.route("/logout", methods=["GET"])
@@ -185,12 +192,15 @@ def dashboard():
     tenant_id = request.args.get("tenant_id") or session.get("tenant_id", "")
     api_key   = request.args.get("api_key")   or session.get("api_key",   "")
 
+    # request.path, never request.full_path: /dashboard accepts tenant_id and
+    # api_key in the query string, and folding those into ?next= would put an
+    # API key in browser history, the Referer header and the access log.
     if not tenant_id or not api_key:
-        return redirect("/login")
+        return redirect(login_url(request.path))
 
     tenant = validate_tenant(tenant_id, api_key)
     if not tenant:
-        return redirect("/login?error=invalid")
+        return redirect(login_url(request.path) + "&error=invalid")
 
     # Save to session on URL-param login
     session["tenant_id"] = tenant_id

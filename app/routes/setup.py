@@ -35,6 +35,7 @@ import integrations                                            # noqa: E402
 from dynamo_client import set_ci_platform, validate_tenant      # noqa: E402
 from integrations import public_base_url                        # noqa: E402
 from observability import get_logger                            # noqa: E402
+from redirects import login_url                                 # noqa: E402
 
 setup_bp = Blueprint("setup", __name__)
 log = get_logger("routes.setup")
@@ -68,7 +69,11 @@ def _build_count(tenant):
 def setup():
     tenant_id, api_key, tenant = _current()
     if not tenant:
-        return redirect("/login")
+        # Come back here after logging in, keeping the platform they were
+        # looking at. Landing on /dashboard instead means the page they asked
+        # for is simply gone, with no way back to it.
+        return redirect(login_url(request.path,
+                                  {"platform": request.args.get("platform")}))
 
     # ?platform= lets someone re-pick without losing what they already saved.
     chosen = (request.args.get("platform")

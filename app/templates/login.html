@@ -82,8 +82,14 @@ function showError(msg) {
   el.textContent = msg; el.style.display = 'block';
 }
 
+// Where to return to after logging in. Rendered by the server, which has
+// already validated it as an internal path — this page never echoes back a
+// raw ?next= from the URL bar.
+const NEXT = {{ (next or '/dashboard') | tojson }};
+
 async function doLogin(payload) {
   try {
+    payload = Object.assign({}, payload, { next: NEXT });
     const r    = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
     const data = await r.json();
     if (r.ok && data.success) {
