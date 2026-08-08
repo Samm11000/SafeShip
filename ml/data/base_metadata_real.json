@@ -1,0 +1,87 @@
+{
+  "model_type": "CalibratedClassifierCV",
+  "trained_at": "2026-08-08T08:40:03.026642+00:00",
+  "feature_columns": [
+    "diff_size",
+    "files_changed",
+    "hour_of_day",
+    "day_of_week",
+    "recent_failure_rate",
+    "test_pass_rate",
+    "is_hotfix",
+    "deployer_exp",
+    "days_since_deploy",
+    "build_time_delta"
+  ],
+  "data_source": "apachejit",
+  "dataset": {
+    "rows": 106674,
+    "projects": 15,
+    "years": "2003-2019",
+    "base_rate": 0.2647,
+    "citation": "Keshavarz & Nagappan, ApacheJIT (MSR 2022), CC-BY-4.0 \u2014 https://doi.org/10.5281/zenodo.5907002"
+  },
+  "split": "time-ordered, train <= 2016",
+  "training_rows": 76563,
+  "calibration": "isotonic",
+  "phase": "base",
+  "training_medians": {
+    "diff_size": 56.0,
+    "files_changed": 3.0,
+    "hour_of_day": 14.0,
+    "day_of_week": 2.0,
+    "recent_failure_rate": 0.2,
+    "test_pass_rate": 0.819,
+    "is_hotfix": 0.0,
+    "deployer_exp": 275.0,
+    "days_since_deploy": 10.6,
+    "build_time_delta": 0.011
+  },
+  "metrics": {
+    "model": "calibrated",
+    "auc_roc": 0.8956,
+    "auc_pr": 0.7251,
+    "mcc": 0.5545,
+    "precision_at_block": 0.7804,
+    "recall_at_block": 0.493,
+    "brier": 0.0959,
+    "ece": 0.0623,
+    "blocked_share": 0.122
+  },
+  "all_metrics": [
+    {
+      "model": "raw",
+      "auc_roc": 0.8958,
+      "auc_pr": 0.7325,
+      "mcc": 0.5806,
+      "precision_at_block": 0.6749,
+      "recall_at_block": 0.6449,
+      "brier": 0.1313,
+      "ece": 0.1827,
+      "blocked_share": 0.1846
+    },
+    {
+      "model": "calibrated",
+      "auc_roc": 0.8956,
+      "auc_pr": 0.7251,
+      "mcc": 0.5545,
+      "precision_at_block": 0.7804,
+      "recall_at_block": 0.493,
+      "brier": 0.0959,
+      "ece": 0.0623,
+      "blocked_share": 0.122
+    },
+    {
+      "model": "synthetic-trained",
+      "auc_roc": 0.8467,
+      "auc_pr": 0.6048,
+      "mcc": 0.49,
+      "precision_at_block": 0.6594,
+      "recall_at_block": 0.5014,
+      "brier": 0.1239,
+      "ece": 0.1058,
+      "blocked_share": 0.1469
+    }
+  ],
+  "caveat": "Labels are SZZ-derived bug-inducing commits, not deployment outcomes. This is a prior over change risk, not a model of a given tenant's deploys. test_pass_rate and build_time_delta are absent from this dataset and carry zero importance until real pipeline data supplies them."
+}

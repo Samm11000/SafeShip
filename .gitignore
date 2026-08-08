@@ -92,3 +92,7 @@ safeship_build_id.txt
 # for data that has a canonical home and a DOI.
 ml/data/apachejit_total.csv
 ml/data/apachejit_*.csv
+# Regenerated in ~2s by ml/train_real_model.py from a DOI'd dataset. Keeping a
+# binary out of git also avoids the line-ending corruption that damaged
+# base_model.pkl once already.
+ml/data/base_model_real.pkl
