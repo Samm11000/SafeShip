@@ -104,10 +104,22 @@ _TIMEOUT = 15
 
 
 def _git(*args: str, cwd: Optional[str] = None) -> Optional[str]:
-    """Run git, returning stdout or None. Never raises."""
+    """
+    Run git, returning stdout or None. Never raises.
+
+    errors="replace" rather than the default strict decoding: a real repository
+    contains binary blobs, latin-1 source files and stray bytes in commit
+    messages, and `text=True` alone raises UnicodeDecodeError on all of them.
+    Found by running this over apache/zookeeper, where it died on commit 20 of
+    839 — none of the synthetic fixtures had a non-UTF-8 byte in them, which is
+    why it survived the unit tests.
+
+    A replaced character costs at most one miscounted keyword. An exception
+    costs the customer their build.
+    """
     try:
         out = subprocess.run(("git",) + args, cwd=cwd, capture_output=True,
-                             text=True, timeout=_TIMEOUT)
+                             encoding="utf-8", errors="replace", timeout=_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout if out.returncode == 0 else None

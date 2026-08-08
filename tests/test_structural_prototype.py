@@ -280,3 +280,40 @@ def test_it_stays_inside_the_pipeline_time_budget():
     start = time.time()
     extract("HEAD~3", "HEAD", cwd=REPO)
     assert time.time() - start < 3.0
+
+
+def test_non_utf8_bytes_do_not_raise(tmp_path):
+    """
+    Real repositories contain binary blobs, latin-1 source and stray bytes in
+    commit messages. subprocess with text=True decodes strictly and raises
+    UnicodeDecodeError on all of them — which killed the first run over
+    apache/zookeeper at commit 20 of 839. None of the fixtures above contain a
+    non-UTF-8 byte, which is exactly why the unit tests missed it.
+
+    A replaced character costs one miscounted keyword. An exception costs the
+    customer their build.
+    """
+    repo = tmp_path / "r"
+    repo.mkdir()
+
+    def git(*args):
+        subprocess.run(("git",) + args, cwd=repo, check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "T")
+    git("config", "commit.gpgsign", "false")
+
+    (repo / "seed.txt").write_text("hello\n")
+    git("add", "-A")
+    git("commit", "-qm", "seed")
+
+    # Latin-1 text plus raw bytes that are not valid UTF-8.
+    (repo / "weird.txt").write_bytes(b"caf\xe9 \xba\xbe\xef\n")
+    (repo / "blob.bin").write_bytes(bytes(range(256)))
+    git("add", "-A")
+    git("commit", "-qm", "add undecodable content")
+
+    result = extract("HEAD~1", "HEAD", cwd=str(repo))
+    assert result["error"] is None
+    assert result["files"] >= 1
