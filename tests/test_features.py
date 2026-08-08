@@ -106,7 +106,14 @@ def test_no_new_hardcoded_feature_lists_appear():
         if re.search(r'"diff_size".*?"build_time_delta"', text, re.S):
             block = re.search(r"[\[(]\s*\"diff_size\".*?\"build_time_delta\",?\s*[\])]",
                               text, re.S)
-            if block:
+            # A literal contains only names, commas, whitespace and comments.
+            # Assigning columns one at a time — out["diff_size"] = ... through
+            # out["build_time_delta"] = ... — also opens with "[" and closes
+            # with "]", so the bracket match alone flags files that correctly
+            # import the contract and merely have to name the columns to build
+            # a frame. An "=" between the first and last name means it is code,
+            # not a re-declared list.
+            if block and "=" not in block.group(0):
                 offenders.append(rel)
     assert not offenders, (
         "these files re-declare the feature list instead of importing it "

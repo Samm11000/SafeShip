@@ -85,3 +85,10 @@ node_modules/
 # during local testing. It is a build artefact, never source.
 reports/
 safeship_build_id.txt
+
+# --- Training datasets -----------------------------------------------------
+# ApacheJIT is ~16MB and re-downloadable from Zenodo on demand
+# (ml/datasets/apachejit.py::download). Committing it would bloat every clone
+# for data that has a canonical home and a DOI.
+ml/data/apachejit_total.csv
+ml/data/apachejit_*.csv
