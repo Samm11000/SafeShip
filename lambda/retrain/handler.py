@@ -42,8 +42,26 @@ AWS_REGION = os.getenv("AWS_DEFAULT_REGION", os.getenv("AWS_EXECUTION_ENV", "us-
 S3_MODELS       = os.getenv("S3_MODELS_BUCKET",  "deploy-gate-models")
 S3_DATA         = os.getenv("S3_DATA_BUCKET",     "deploy-gate-data")
 DYNAMO_TABLE    = os.getenv("DYNAMO_TABLE",       "tenants")
-MIN_PRECISION   = 0.75    # minimum precision to swap model
-MIN_AUC         = 0.70    # minimum AUC-ROC to swap model
+# PRECISION IS NOT COMPARABLE BETWEEN TENANTS.
+#
+# It is bounded below by the tenant's own failure rate, so a fixed threshold
+# means something different for everyone. The old `precision >= 0.75` gate:
+#
+#   a tenant whose deploys fail 76% of the time  -> a model that flags EVERY
+#       build as risky scores 0.760 and is promoted
+#   a tenant at the DORA-elite rate of under 5%  -> can almost never clear the
+#       bar however good its model is
+#
+# That is exactly backwards. SafeShip is worth least to the first group — when
+# three quarters of your deploys break you do not need a model to tell you — and
+# worth most to the second, where the rare bad deploy is genuinely hard to spot.
+#
+# Measured on ApacheJIT, leave-one-project-out: lift over base rate ranged
+# 1.20x to 3.26x across 14 projects, median 1.99x, while raw AUC-PR ranged
+# 0.400 to 0.918 in almost the opposite order. Lift is the comparable number.
+MIN_PRECISION_LIFT = 1.5   # precision must beat the tenant's base rate by this
+MIN_PRECISION_ABS  = 0.10  # ...and still not be absurdly low in absolute terms
+MIN_AUC         = 0.70    # AUC-ROC is base-rate independent, so it stays absolute
 MIN_RISKY_RATIO = 0.05    # minimum risky build ratio in test set
 
 # A promotion decision is only as trustworthy as the set it was measured on.
@@ -292,11 +310,19 @@ def validate_model(new_model, old_model, X_test, y_test, dataset_size):
     n_test       = int(len(y_test))
     n_test_risky = int((y_test == 1).sum())
 
+    # What a coin flip would score on THIS tenant, which is the only fair
+    # comparison. A model is worth promoting when it beats that, not when it
+    # clears a number chosen for somebody else's failure rate.
+    required_precision = max(MIN_PRECISION_ABS, risky_ratio * MIN_PRECISION_LIFT)
+    lift = (precision / risky_ratio) if risky_ratio > 0 else 0.0
+
     checks = {
         f"dataset_size >= {MIN_BUILDS}":   dataset_size >= MIN_BUILDS,
         f"test_rows >= {MIN_TEST_ROWS}":   n_test       >= MIN_TEST_ROWS,
         f"test_risky >= {MIN_TEST_RISKY}": n_test_risky >= MIN_TEST_RISKY,
-        f"precision >= {MIN_PRECISION}":   precision    >= MIN_PRECISION,
+        f"precision >= {required_precision:.3f} "
+        f"({MIN_PRECISION_LIFT}x this tenant's {risky_ratio:.1%} failure rate)":
+            precision >= required_precision,
         f"auc_roc >= {MIN_AUC}":           auc          >= MIN_AUC,
         f"risky_ratio >= {MIN_RISKY_RATIO}": risky_ratio >= MIN_RISKY_RATIO,
     }
@@ -326,6 +352,11 @@ def validate_model(new_model, old_model, X_test, y_test, dataset_size):
         "test_rows":       n_test,
         "test_risky_rows": n_test_risky,
         "split":           "time-ordered tail",
+        # Recorded because precision alone cannot be compared across tenants,
+        # or against this tenant's own past, if the failure rate has moved.
+        "base_rate":          round(float(risky_ratio), 4),
+        "precision_lift":     round(float(lift), 3),
+        "precision_required": round(float(required_precision), 4),
         "checks":      checks,
         "passed":      all_pass,
     }

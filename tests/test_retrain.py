@@ -213,7 +213,59 @@ def test_check_names_state_the_thresholds_actually_enforced():
     assert f"dataset_size >= {handler.MIN_BUILDS}" in names
     assert f"test_rows >= {handler.MIN_TEST_ROWS}" in names
     assert f"test_risky >= {handler.MIN_TEST_RISKY}" in names
-    assert str(handler.MIN_PRECISION) in names
+    # The precision bar is per-tenant now, so the check names the multiple and
+    # the tenant's own failure rate rather than a number chosen for someone else.
+    assert f"{handler.MIN_PRECISION_LIFT}x" in names
+    assert "failure rate" in names
+
+
+def test_the_precision_bar_scales_with_the_tenants_failure_rate():
+    """
+    Precision is bounded below by the base rate, so a fixed threshold means
+    something different for every tenant. Under the old `precision >= 0.75`:
+
+      a tenant failing 76% of the time -> a model that flags EVERY build scores
+          0.760 and gets promoted
+      a tenant at the DORA-elite rate under 5% -> can almost never clear the bar,
+          however good the model is
+
+    Backwards, since SafeShip is worth least to the first and most to the second.
+    """
+    import numpy as np
+
+    class AlwaysRisky:
+        def predict(self, X):
+            return np.ones(len(X), dtype=int)
+
+        def predict_proba(self, X):
+            return np.column_stack([np.zeros(len(X)), np.ones(len(X))])
+
+    import pandas as pd
+
+    for base_rate in (0.76, 0.05):
+        n = 400
+        y = pd.Series([1] * int(n * base_rate) + [0] * (n - int(n * base_rate)))
+        X = pd.DataFrame({c: np.random.default_rng(0).normal(size=n)
+                          for c in handler.FEATURE_COLUMNS})
+        passed, metrics = handler.validate_model(AlwaysRisky(), None, X, y, 500)
+
+        assert passed is False, (
+            f"a model that flags everything was promoted at a {base_rate:.0%} "
+            "base rate"
+        )
+        failed = [k for k, ok in metrics["checks"].items() if not ok]
+        assert any("failure rate" in f for f in failed), (
+            f"the precision check did not catch it at {base_rate:.0%}; "
+            f"failed checks were {failed}"
+        )
+
+
+def test_the_metrics_record_lift_so_promotions_stay_comparable():
+    df = _synthetic_history(400)
+    model, X_test, y_test = handler.train_model(df)
+    _, metrics = handler.validate_model(model, None, X_test, y_test, len(df))
+    assert "precision_lift" in metrics and "base_rate" in metrics
+    assert metrics["precision_required"] >= handler.MIN_PRECISION_ABS
 
 
 def test_the_gate_constants_are_mutually_reachable():

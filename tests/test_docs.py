@@ -274,7 +274,12 @@ def test_the_retrain_floors_documented_match_the_code(readme):
         f"the README does not state the real minimum ({handler.MIN_BUILDS})"
     )
     assert str(handler.MIN_TEST_ROWS) in section
-    assert str(handler.MIN_PRECISION) in section
+    # The precision bar is a multiple of the tenant's own failure rate, so the
+    # README has to describe it that way rather than quoting a fixed number.
+    assert f"{handler.MIN_PRECISION_LIFT}×" in section or \
+           f"{handler.MIN_PRECISION_LIFT}x" in section, \
+        "the README still quotes a fixed precision threshold"
+    assert str(handler.MIN_AUC) in section
 
 
 def test_https_is_named_as_the_top_priority(readme):

@@ -676,7 +676,15 @@ only promoted once there are enough of them to measure on:
 * a **time-ordered** held-out set of at least 40 builds, containing at least 5
   failures — a random split would train on builds that happened after the ones it
   is scored on, which reports a number the deployed model cannot achieve
-* precision ≥ 0.75 and AUC ≥ 0.70 on that set
+* precision at least **1.5× your own deploy-failure rate** — not a fixed number.
+  Precision is bounded below by the base rate, so a single threshold means
+  different things for different teams: at a 76% failure rate a model that flags
+  *every* build scores 0.760 and would have been promoted, while a team at the
+  DORA-elite rate under 5% could almost never clear a fixed 0.75 however good
+  its model was. That is backwards — SafeShip is worth least to the first team
+  and most to the second. Measured leave-one-project-out on ApacheJIT, lift
+  ranged 1.20× to 3.26× across 14 projects (median 1.99×)
+* AUC ≥ 0.70, which is base-rate independent and so stays absolute
 * and no regression against the model already in production
 
 Below those floors the retrain job **skips rather than promotes**. Reporting
