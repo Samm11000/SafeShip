@@ -206,6 +206,42 @@ _cache = ModelCache()
 # MAIN SCORING FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
 
+def feature_importances(model):
+    """
+    Per-feature importances, wherever the estimator keeps them.
+
+    A calibrated model is a wrapper: CalibratedClassifierCV holds the fitted
+    forest inside itself and exposes predict_proba but not feature_importances_.
+    Reading the attribute directly works fine until the day a calibrated model is
+    promoted, at which point every /score request raises AttributeError — the
+    dashboard's importance chart too. Since calibration is the change that makes
+    the 0-100 score mean anything, that day was coming.
+
+    Returns a zero vector rather than raising if nothing exposes importances: the
+    score is still valid, only the explanation is missing, and losing the "why"
+    is not a reason to fail the request.
+    """
+    if hasattr(model, "feature_importances_"):
+        return model.feature_importances_
+
+    # CalibratedClassifierCV(cv="prefit") keeps the original under .estimator;
+    # the fitted per-fold copies live in .calibrated_classifiers_.
+    for attr in ("estimator", "base_estimator"):
+        inner = getattr(model, attr, None)
+        if inner is not None and hasattr(inner, "feature_importances_"):
+            return inner.feature_importances_
+
+    for cal in getattr(model, "calibrated_classifiers_", []) or []:
+        for attr in ("estimator", "base_estimator"):
+            inner = getattr(cal, attr, None)
+            if inner is not None and hasattr(inner, "feature_importances_"):
+                return inner.feature_importances_
+
+    log.warning("model exposes no feature importances; scoring without reasons",
+                extra={"model_type": type(model).__name__})
+    return [0.0] * len(FEATURE_COLUMNS)
+
+
 def score_build(features_list, tenant_id="base", imputed=None, sources=None):
     """
     Takes a list of 10 feature values and returns a score dict.
@@ -276,7 +312,7 @@ def score_build(features_list, tenant_id="base", imputed=None, sources=None):
     imputed_set = set(imputed or ())
     sources     = sources or {}
 
-    importances = model.feature_importances_
+    importances = feature_importances(model)
     reasons = []
     for i, (feat, imp) in enumerate(zip(FEATURE_COLUMNS, importances)):
         val         = features_list[i]

@@ -231,11 +231,13 @@ def dashboard():
     progress_pct   = min(100, int(labelled_count / RETRAIN_MIN_BUILDS * 100))
 
     try:
-        from scorer import _cache, FEATURE_COLUMNS
+        from scorer import _cache, FEATURE_COLUMNS, feature_importances
         model, _ = _cache.get_model(tenant_id)
 
+        # Via the helper, not the attribute: a calibrated model keeps the forest
+        # inside a wrapper and exposes no feature_importances_ of its own.
         feat_imp = sorted(
-        zip(FEATURE_COLUMNS, model.feature_importances_),
+        zip(FEATURE_COLUMNS, feature_importances(model)),
         key=lambda x: x[1],
         reverse=True
         )[:5]
