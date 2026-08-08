@@ -156,8 +156,19 @@
     .score-warn  { color: var(--amber); }
     .score-block { color: var(--red); }
 
+    /* Quiet secondary link — used for "Change platform", "Skip setup" and the
+       like, where the action should be findable without competing with the
+       primary one. */
+    .link-quiet {
+      font-family: var(--mono); font-size: 11px; color: var(--muted);
+      text-decoration: none; transition: color 0.15s;
+    }
+    .link-quiet:hover { color: var(--ink); }
+
     /* GRIDS */
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    /* align-items:start stops a short card being stretched to match a tall
+       sibling, which is what left a large empty area under the settings panel. */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
     .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
     .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
 

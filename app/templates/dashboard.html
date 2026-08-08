@@ -140,13 +140,16 @@
         {% else %}<a href="/setup">Connect your pipeline</a> to get started.{% endif %}
       </div>
       {% else %}
-      <canvas id="scoreChart" height="200"></canvas>
+      {# maintainAspectRatio:false makes Chart.js size to the PARENT, so the
+         parent must have a height or the canvas grows without bound. The
+         height attribute on the canvas is ignored in that mode. #}
+      <div style="height:240px"><canvas id="scoreChart"></canvas></div>
       {% endif %}
     </div>
     <div class="card">
       <div class="card-title">Feature Importance — What Drives Your Scores</div>
       {% if feat_names and feat_names|length > 0 %}
-      <canvas id="featChart" height="200"></canvas>
+      <div style="height:240px"><canvas id="featChart"></canvas></div>
       {% else %}
       <div style="text-align:center;padding:48px;font-family:var(--mono);font-size:12px;color:var(--muted)">Loading...</div>
       {% endif %}
@@ -227,39 +230,49 @@
     <span id="save-msg" style="display:none">✓ Saved</span>
   </div>
 
-  <div>
-
-    {% if integration %}
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div class="card-title" style="margin-bottom:0">
-          Pipeline — {{ integration.name }}
-        </div>
-        <a href="/setup" style="font-family:var(--mono);font-size:11px;color:var(--muted)">
-          Change platform
-        </a>
-      </div>
-      <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin:10px 0">
-        {{ integration.snippet.filename }}
-      </p>
-      <pre id="pipeline-snippet">{{ integration.snippet.code }}</pre>
-      <button class="btn-ghost" onclick="copyText('pipeline-snippet')">Copy</button>
-      <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:12px">
-        <a href="/setup">Full setup steps, secrets and prerequisites →</a>
-      </p>
+  {#
+    This used to render the whole pipeline snippet — 40 lines of YAML in a
+    half-width column, wrapping badly and unreadable, and a duplicate of what
+    the setup wizard already shows properly. The wizard owns the snippet; the
+    dashboard just needs to answer "is this connected, and to what".
+  #}
+  {% if integration %}
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div class="card-title" style="margin-bottom:0">Pipeline</div>
+      <a href="/setup?step=1" class="link-quiet">Change platform</a>
     </div>
-    {% else %}
-    <div class="card">
-      <div class="card-title">Connect your pipeline</div>
-      <p style="font-size:14px;color:var(--ink2);line-height:1.6">
-        SafeShip works with GitHub Actions, Jenkins and Bitbucket Pipelines.
-        Pick yours and we'll hand you the exact secrets and snippet for it.
-      </p>
-      <a href="/setup" class="btn-primary" style="margin-top:16px">Set up in 2 minutes</a>
-    </div>
-    {% endif %}
 
+    <div style="display:flex;align-items:center;gap:12px;margin:16px 0 6px">
+      <span style="font-size:17px;font-weight:700;letter-spacing:-0.3px">{{ integration.name }}</span>
+      {% if build_count %}
+        <span class="badge badge-green">Receiving builds</span>
+      {% else %}
+        <span class="badge badge-amber">No builds yet</span>
+      {% endif %}
+    </div>
+
+    <p style="font-size:13px;color:var(--ink2);line-height:1.6">
+      Configured in <code>{{ integration.snippet.filename }}</code>.
+      {% if not build_count %}
+        Nothing has arrived yet — finish the setup steps, then trigger a build.
+      {% endif %}
+    </p>
+
+    <a href="/setup?step=3&platform={{ ci_platform }}" class="btn-ghost" style="margin-top:16px">
+      {% if build_count %}View the snippet{% else %}Finish setup{% endif %}
+    </a>
   </div>
+  {% else %}
+  <div class="card">
+    <div class="card-title">Connect your pipeline</div>
+    <p style="font-size:14px;color:var(--ink2);line-height:1.6">
+      SafeShip works with GitHub Actions, Jenkins and Bitbucket Pipelines. Pick
+      yours and you'll get the exact secrets and snippet for it.
+    </p>
+    <a href="/setup" class="btn-primary" style="margin-top:16px">Set up in 2 minutes</a>
+  </div>
+  {% endif %}
 </div>
   <script>
   const TENANT_ID = "{{ tenant_id }}";
@@ -271,6 +284,23 @@
     const nums = {{ build_nums|safe }};
     const featNames = {{ feat_names|safe }};
     const featValues = {{ feat_values|safe }};
+    // Per-build verdict colours. The route has always computed these; the chart
+    // just never used them, so it rendered in Chart.js's default blue —
+    // a colour that appears nowhere else in the product, on the one element
+    // where colour could carry meaning.
+    const verdictColors = {{ colors|safe }};
+
+    // Read from the palette rather than repeating hex values here, so the
+    // charts stay in step with the rest of the page.
+    const css = getComputedStyle(document.documentElement);
+    const token = (name, fallback) => (css.getPropertyValue(name) || fallback).trim();
+    const accent = token('--accent', '#4f46e5');
+    const gridline = token('--border', 'rgba(0,0,0,0.08)');
+    const muted = token('--muted', '#888880');
+
+    Chart.defaults.font.family = token('--mono', 'monospace');
+    Chart.defaults.font.size = 11;
+    Chart.defaults.color = muted;
 
     if (document.getElementById("scoreChart") && scores.length) {
       new Chart(scoreChart, {
@@ -281,12 +311,24 @@
             data: scores,
             tension: .35,
             fill: true,
-            borderWidth: 2
+            borderWidth: 2,
+            borderColor: accent,
+            backgroundColor: 'rgba(79,70,229,0.10)',
+            // Each point takes its verdict colour, so a run of red reads at a
+            // glance without checking the axis.
+            pointBackgroundColor: verdictColors,
+            pointBorderColor: verdictColors,
+            pointRadius: 3,
+            pointHoverRadius: 5
           }]
         },
         options: {
+          maintainAspectRatio: false,
           plugins:{legend:{display:false}},
-          scales:{y:{min:0,max:100}}
+          scales:{
+            y:{min:0,max:100,grid:{color:gridline},border:{display:false}},
+            x:{grid:{display:false},border:{color:gridline}}
+          }
         }
       });
     }
@@ -298,23 +340,26 @@
           labels: featNames,
           datasets: [{
             data: featValues,
-            borderWidth:1
+            borderWidth: 0,
+            backgroundColor: accent,
+            borderRadius: 3,
+            barThickness: 14
           }]
         },
         options:{
           indexAxis:'y',
-          plugins:{legend:{display:false}}
+          maintainAspectRatio: false,
+          plugins:{legend:{display:false}},
+          scales:{
+            x:{grid:{color:gridline},border:{display:false},
+               ticks:{callback: v => v + '%'}},
+            y:{grid:{display:false},border:{display:false}}
+          }
         }
       });
     }
 
   });
-
-  function copyText(id){
-  navigator.clipboard.writeText(
-    document.getElementById(id).textContent
-  );
-  }
 
   async function saveSettings(){
   const r = await fetch('/settings',{
