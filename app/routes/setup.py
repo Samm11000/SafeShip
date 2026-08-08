@@ -32,7 +32,8 @@ _app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _app_dir)
 
 import integrations                                            # noqa: E402
-from dynamo_client import set_ci_platform, validate_tenant      # noqa: E402
+from dynamo_client import (set_ci_platform, set_onboarding_step,  # noqa: E402
+                           validate_tenant)
 from integrations import public_base_url                        # noqa: E402
 from observability import get_logger                            # noqa: E402
 from redirects import login_url                                 # noqa: E402
@@ -65,6 +66,37 @@ def _build_count(tenant):
 
 # ── the wizard ───────────────────────────────────────────────────────────────
 
+#: The wizard, in order. `needs_platform` marks the steps that cannot render
+#: without one, so a deep link to step 3 before choosing lands on step 1 rather
+#: than on a blank page.
+STEPS = (
+    {"n": 1, "key": "platform", "label": "Platform", "needs_platform": False},
+    {"n": 2, "key": "secrets",  "label": "Secrets",  "needs_platform": True},
+    {"n": 3, "key": "pipeline", "label": "Pipeline", "needs_platform": True},
+    {"n": 4, "key": "verify",   "label": "Verify",   "needs_platform": True},
+)
+LAST_STEP = STEPS[-1]["n"]
+
+
+def _requested_step(raw, chosen, furthest):
+    """
+    Which step to show.
+
+    Explicit ?step= wins so Back, browser-back and a bookmarked link all behave.
+    Without one, resume where they left off — someone who closed the tab to go
+    and paste a secret should come back to the step they were on, not the start.
+    """
+    try:
+        step = int(raw)
+    except (TypeError, ValueError):
+        step = furthest or 1
+
+    step = max(1, min(LAST_STEP, step))
+    if step > 1 and not chosen:
+        return 1                      # nothing downstream renders without one
+    return step
+
+
 @setup_bp.route("/setup", methods=["GET"])
 def setup():
     tenant_id, api_key, tenant = _current()
@@ -81,11 +113,23 @@ def setup():
     if chosen and not integrations.is_valid(chosen):
         chosen = ""
 
+    try:
+        furthest = int(tenant.get("onboarding_step", 0) or 0)
+    except (TypeError, ValueError):
+        furthest = 0
+
+    count = _build_count(tenant)
+    connected = count > 0
+    step = _requested_step(request.args.get("step"), chosen,
+                           LAST_STEP if connected else furthest)
+
     base_url = public_base_url()
     details = (integrations.describe(chosen, tenant_id, api_key, base_url)
                if chosen else None)
 
-    count = _build_count(tenant)
+    if step > furthest:
+        set_onboarding_step(tenant_id, step)
+
     return render_template(
         "setup.html",
         tenant_id=tenant_id, api_key=api_key,
@@ -93,11 +137,14 @@ def setup():
         chosen=chosen, details=details,
         base_url=base_url,
         # A wizard that tells you to paste an API key into a pipeline over plain
-        # HTTP has not earned the trust it is asking for. Say so rather than
-        # hiding it.
+        # HTTP has not earned the trust it is asking for. Shown on the step that
+        # actually reveals the key, not as a banner over the whole flow — a red
+        # block before you have done anything reads as "this is broken".
         insecure_url=base_url.startswith("http://"),
         build_count=count,
-        connected=count > 0,
+        connected=connected,
+        steps=STEPS, step=step, last_step=LAST_STEP,
+        furthest=max(furthest, step),
     )
 
 
@@ -116,8 +163,10 @@ def choose_platform():
     set_ci_platform(tenant_id, platform)
     log.info("ci platform chosen",
              extra={"tenant_id": tenant_id, "ci_platform": platform})
+    # Straight on to step 2 — choosing is the whole of step 1, so making someone
+    # then press Next is a click that carries no information.
     return jsonify({"ok": True, "platform": platform,
-                    "redirect": f"/setup?platform={platform}"}), 200
+                    "redirect": f"/setup?platform={platform}&step=2"}), 200
 
 
 @setup_bp.route("/api/setup/status", methods=["GET"])

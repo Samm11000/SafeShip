@@ -218,6 +218,11 @@ def dashboard():
         1 for b in builds
         if str(b.get("label", "")).strip() in ["0", "1"]
     )
+    # Replaces "model precision" as a headline number. That figure is measured
+    # against synthetic labels, so it describes how well the model copied a
+    # hand-written rule — presenting it as a KPI reads as accuracy, which it is
+    # not. How many deploys SafeShip actually stopped is a fact.
+    blocked_count  = sum(1 for b in builds if int(b.get("predicted_score", 0) or 0) > 70)
     model_phase    = tenant.get("model_phase",   "base")
     precision      = float(tenant.get("model_precision", 0.851))
     # Progress toward getting your own model, so it has to use the threshold the
@@ -271,8 +276,9 @@ def dashboard():
         scores=json.dumps(scores), build_nums=json.dumps(build_nums),
         colors=json.dumps(colors),
         build_count=build_count, labelled_count=labelled_count,
+        blocked_count=blocked_count,
         model_phase=model_phase, precision=round(precision*100,1),
-        progress_pct=progress_pct,
+        progress_pct=progress_pct, retrain_target=RETRAIN_MIN_BUILDS,
         recent_builds=list(reversed(builds))[:10],
         feat_names=json.dumps(feat_names), feat_values=json.dumps(feat_values),
         integration=integration,

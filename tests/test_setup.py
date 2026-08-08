@@ -351,18 +351,22 @@ def test_the_chosen_platform_drives_the_rendered_instructions(client, creds):
     _login(client, creds)
     client.post("/setup/platform", json={"platform": "jenkins"})
 
-    body = client.get("/setup").get_data(as_text=True)
-    assert "Jenkinsfile" in body
-    assert creds["api_key"] in body, "the user needs their key to paste it"
+    # The snippet lives on step 3 and the credentials on step 2 — one step is on
+    # screen at a time, which is the point of the wizard.
+    secrets_step = client.get("/setup?step=2").get_data(as_text=True)
+    assert creds["api_key"] in secrets_step, "the user needs their key to paste it"
+
+    pipeline_step = client.get("/setup?step=3").get_data(as_text=True)
+    assert "Jenkinsfile" in pipeline_step
     # And not another platform's instructions.
-    assert "bitbucket-pipelines.yml" not in body
+    assert "bitbucket-pipelines.yml" not in pipeline_step
 
 
 def test_the_platform_can_be_previewed_without_being_saved(client, creds, env):
     _login(client, creds)
     client.post("/setup/platform", json={"platform": "jenkins"})
 
-    body = client.get("/setup?platform=github-actions").get_data(as_text=True)
+    body = client.get("/setup?step=3&platform=github-actions").get_data(as_text=True)
     assert "actions: read" in body
     # The saved choice is unchanged — ?platform= only previews.
     assert env["dynamo"].get_tenant(creds["tenant_id"])["ci_platform"] == "jenkins"
@@ -371,7 +375,87 @@ def test_the_platform_can_be_previewed_without_being_saved(client, creds, env):
 def test_a_garbage_platform_in_the_query_falls_back_to_the_picker(client, creds):
     _login(client, creds)
     body = client.get("/setup?platform=<script>").get_data(as_text=True)
-    assert "Pick a platform" in body
+    # Back to step 1 with all three offered, rather than a step that cannot
+    # render without a platform.
+    assert "Which CI do you use?" in body
+    for platform in ALL:
+        assert integrations.get(platform).NAME in body
+
+
+def test_a_deep_link_past_the_picker_without_a_platform_lands_on_step_one(client, env):
+    """
+    /setup?step=3 with nothing chosen has nothing to render — no secrets, no
+    snippet. Showing an empty step 3 would look broken; step 1 is the honest
+    answer to "you haven't told me your platform yet".
+    """
+    import dynamo_client
+    fresh = dynamo_client.create_tenant(email="deeplink@safeship.test")
+    _login(client, fresh)
+
+    body = client.get("/setup?step=3").get_data(as_text=True)
+    assert "Which CI do you use?" in body
+
+
+def test_only_one_step_is_on_screen_at_a_time(client, creds):
+    """The old page dumped all four steps into one 3000px scroll."""
+    _login(client, creds)
+    client.post("/setup/platform", json={"platform": "github-actions"})
+
+    step2 = client.get("/setup?step=2").get_data(as_text=True)
+    assert "Add these three secrets" in step2
+    assert "Which CI do you use?" not in step2
+    assert ".github/workflows/deploy.yml" not in step2
+
+    step3 = client.get("/setup?step=3").get_data(as_text=True)
+    assert "Add these steps to your pipeline" in step3
+    assert "Add these three secrets" not in step3
+
+
+def test_progress_is_remembered_so_setup_can_be_resumed(client, env):
+    """
+    People leave mid-setup to go and paste a secret somewhere else. Coming back
+    to the start would mean doing it all again.
+    """
+    import dynamo_client
+    fresh = dynamo_client.create_tenant(email="resume@safeship.test")
+    _login(client, fresh)
+
+    client.post("/setup/platform", json={"platform": "jenkins"})
+    client.get("/setup?step=3")
+
+    # Returning with no ?step= resumes rather than restarting.
+    body = client.get("/setup").get_data(as_text=True)
+    assert "Add these steps to your pipeline" in body
+
+
+def test_revisiting_an_earlier_step_does_not_lose_progress(client, env):
+    import dynamo_client
+    fresh = dynamo_client.create_tenant(email="backwards@safeship.test")
+    _login(client, fresh)
+    client.post("/setup/platform", json={"platform": "jenkins"})
+    client.get("/setup?step=3")
+
+    client.get("/setup?step=2")          # go back to re-read something
+    body = client.get("/setup").get_data(as_text=True)
+    assert "Add these steps to your pipeline" in body, (
+        "going back to re-read a step reset how far the user had got"
+    )
+
+
+def test_choosing_a_platform_moves_straight_to_the_next_step(client, creds):
+    # Choosing IS step 1, so making someone then press Next is a click that
+    # carries no information.
+    _login(client, creds)
+    r = client.post("/setup/platform", json={"platform": "bitbucket"})
+    assert "step=2" in r.get_json()["redirect"]
+
+
+def test_an_out_of_range_step_is_clamped(client, creds):
+    _login(client, creds)
+    client.post("/setup/platform", json={"platform": "jenkins"})
+    for bad in ("0", "-4", "99", "abc", ""):
+        r = client.get(f"/setup?step={bad}")
+        assert r.status_code == 200, f"step={bad!r} broke the page"
 
 
 def test_a_plain_http_endpoint_is_called_out(client, creds, monkeypatch):
@@ -383,16 +467,27 @@ def test_a_plain_http_endpoint_is_called_out(client, creds, monkeypatch):
     monkeypatch.setenv("SAFESHIP_PUBLIC_URL", "http://54.89.160.150")
     _login(client, creds)
     client.post("/setup/platform", json={"platform": "github-actions"})
-    body = client.get("/setup").get_data(as_text=True)
+
+    # On the step that actually reveals the key — a red block above step 1,
+    # before the user has done anything, reads as "this product is broken"
+    # rather than "mind this one thing".
+    body = client.get("/setup?step=2").get_data(as_text=True)
     assert "plain HTTP" in body
-    assert "cleartext" in body
+    assert "unencrypted" in body
+
+
+def test_the_http_warning_sits_with_the_key_it_is_about(client, creds, monkeypatch):
+    monkeypatch.setenv("SAFESHIP_PUBLIC_URL", "http://54.89.160.150")
+    _login(client, creds)
+    client.post("/setup/platform", json={"platform": "github-actions"})
+    assert "plain HTTP" not in client.get("/setup?step=1").get_data(as_text=True)
 
 
 def test_no_warning_when_the_endpoint_is_https(client, creds, monkeypatch):
     monkeypatch.setenv("SAFESHIP_PUBLIC_URL", "https://safeship.example")
     _login(client, creds)
     client.post("/setup/platform", json={"platform": "github-actions"})
-    body = client.get("/setup").get_data(as_text=True)
+    body = client.get("/setup?step=2").get_data(as_text=True)
     assert "plain HTTP" not in body
 
 

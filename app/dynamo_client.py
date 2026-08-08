@@ -209,12 +209,37 @@ def set_ci_platform(tenant_id, platform):
         _table().update_item(
             Key={"tenant_id": tenant_id},
             UpdateExpression="SET ci_platform = :p, onboarding_step = :s",
-            ExpressionAttributeValues={":p": platform, ":s": 1},
+            ExpressionAttributeValues={":p": platform, ":s": 2},
         )
         log.info("ci platform selected",
                  extra={"tenant_id": tenant_id, "ci_platform": platform})
         return True
     except Exception as e:
         log.error("set_ci_platform failed",
+                  extra={"tenant_id": tenant_id, "err": str(e)})
+        return False
+
+
+def set_onboarding_step(tenant_id, step):
+    """
+    Remembers how far through setup someone got.
+
+    Only ever moves forward, so revisiting an earlier step to re-read it does not
+    reset the progress they already made. Closing the tab mid-setup and coming
+    back later should resume, not restart — people leave to go and paste a secret
+    into another tab, which is the whole point of the step being there.
+    """
+    try:
+        _table().update_item(
+            Key={"tenant_id": tenant_id},
+            UpdateExpression="SET onboarding_step = :s",
+            ConditionExpression="attribute_not_exists(onboarding_step) OR onboarding_step < :s",
+            ExpressionAttributeValues={":s": int(step)},
+        )
+        return True
+    except _table().meta.client.exceptions.ConditionalCheckFailedException:
+        return False          # already further along; nothing to do
+    except Exception as e:
+        log.error("set_onboarding_step failed",
                   extra={"tenant_id": tenant_id, "err": str(e)})
         return False
