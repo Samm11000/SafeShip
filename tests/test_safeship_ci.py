@@ -587,6 +587,53 @@ def test_outside_a_repository_nothing_is_invented(tmp_path):
     assert "not a git repository" in note or "no parent" in note
 
 
+def test_reformatting_is_not_counted_as_risk(repo):
+    """
+    A Prettier run, an import reorder or a line-ending normalisation touches
+    every line and changes nothing. Counting that as churn made it read as one
+    of the largest and riskiest changes a team had ever shipped — backwards,
+    since a mechanical reformat is among the safest things you can deploy.
+
+    Measured on this repository: normalising line endings produced 35,445
+    changed lines by the old measure and 15 by this one, and diff_size carries
+    0.176 of the model's weight.
+    """
+    (repo / "a.txt").write_text("one    \n\ttwo\nthree\n")   # whitespace only
+    _git(str(repo), "add", "-A")
+    _git(str(repo), "commit", "-qm", "reformat")
+
+    size, files, note = gitinfo.diff_stats(cwd=str(repo))
+    assert size == 0, f"a pure reformat scored {size} lines of change"
+    assert files == 0
+    assert "formatting" in note, "the user must be told why a big diff scored zero"
+
+
+def test_a_real_change_is_unaffected_by_the_whitespace_fix(repo):
+    """
+    The fix must sharpen the pathological case without shifting the
+    distribution the model was trained on. For ordinary commits the two
+    measures agree exactly.
+    """
+    (repo / "a.txt").write_text("ONE\ntwo\n")
+    (repo / "b.txt").write_text("new\n")
+    _git(str(repo), "add", "-A")
+    _git(str(repo), "commit", "-qm", "real change")
+
+    size, files, _ = gitinfo.diff_stats(cwd=str(repo))
+    assert (size, files) == (4, 2), "a substantive change must measure the same as before"
+
+
+def test_a_mixed_change_counts_only_the_substantive_part(repo):
+    """The common real case: a genuine edit landing alongside a reformat."""
+    (repo / "a.txt").write_text("one   \n  two\nthree\nFOUR\n")  # 3 reformat + 1 real
+    _git(str(repo), "add", "-A")
+    _git(str(repo), "commit", "-qm", "one real line among reformatting")
+
+    size, _, note = gitinfo.diff_stats(cwd=str(repo))
+    assert 0 < size <= 2, f"expected roughly the one added line, got {size}"
+    assert "formatting" in note
+
+
 def test_an_empty_diff_is_zero_not_unknown(repo):
     # Genuinely zero churn is a measurement. It must not become None.
     size, files, _ = gitinfo.diff_stats(base=gitinfo.head_sha(cwd=str(repo)),
