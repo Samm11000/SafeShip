@@ -52,8 +52,11 @@ from sklearn.metrics import (average_precision_score, brier_score_loss,
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
+
 from datasets import apachejit  # noqa: E402
 from features import FEATURE_COLUMNS, validate_model  # noqa: E402
+from imputation import TRAINING_MEDIANS as SERVING_MEDIANS  # noqa: E402
 
 MODEL_PATH = os.path.join(HERE, "data", "base_model_real.pkl")
 META_PATH = os.path.join(HERE, "data", "base_metadata_real.json")
@@ -133,7 +136,21 @@ def main() -> int:
     # Impute from TRAINING medians only. Using the whole dataset's medians would
     # leak the test period's distribution into the training features.
     medians = Xtr.median()
+
+    # A column that is entirely NaN has a NaN median, so fillna leaves it NaN —
+    # and the model then trains on "this feature is always missing". At serve
+    # time /score fills those same two features with the values in
+    # app/imputation.py, so the model would meet a number where it had only ever
+    # seen absence. That is train/serve skew, and it is silent. Fall back to the
+    # serving medians so both sides agree.
+    for col in FEATURE_COLUMNS:
+        if pd.isna(medians[col]):
+            medians[col] = SERVING_MEDIANS[col]
+            print(f"  {col}: absent from this dataset, using the serving "
+                  f"median {SERVING_MEDIANS[col]} so training matches /score")
+
     Xtr, Xte = Xtr.fillna(medians), Xte.fillna(medians)
+    assert not Xtr.isna().any().any(), "features still missing after imputation"
 
     print("\n  fitting...")
     model = RandomForestClassifier(**FOREST).fit(Xtr, ytr)
